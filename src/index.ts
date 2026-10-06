@@ -7,3 +7,5 @@ export * from "./envelope.js";
 export * from "./terminal.js";
 export * from "./storage.js";
 export * from "./idempotency.js";
+export * from "./operations.js";
+export * from "./rotation.js";

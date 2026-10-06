@@ -12,7 +12,8 @@ export type SignerErrorCode =
   | "INVALID_BORROWER_ID"
   | "INSECURE_KEY_PERMISSIONS"
   | "STORED_KEY_CORRUPT"
-  | "IDEMPOTENCY_PAYLOAD_MISMATCH";
+  | "IDEMPOTENCY_PAYLOAD_MISMATCH"
+  | "OPERATION_NOT_FOUND";
 
 /** All SDK-raised failures carry a stable `code` from {@link SignerErrorCode}. */
 export class SignerError extends Error {
