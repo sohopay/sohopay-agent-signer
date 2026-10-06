@@ -7,7 +7,12 @@ export type SignerErrorCode =
   | "INVALID_PUBLIC_JWK"
   | "PAYMENT_ID_MISMATCH"
   | "AGENT_KEY_JKT_MISMATCH"
-  | "MALFORMED_ENVELOPE";
+  | "MALFORMED_ENVELOPE"
+  | "INVALID_TERMINAL_ID"
+  | "INVALID_BORROWER_ID"
+  | "INSECURE_KEY_PERMISSIONS"
+  | "STORED_KEY_CORRUPT"
+  | "IDEMPOTENCY_PAYLOAD_MISMATCH";
 
 /** All SDK-raised failures carry a stable `code` from {@link SignerErrorCode}. */
 export class SignerError extends Error {
