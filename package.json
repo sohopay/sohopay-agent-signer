@@ -24,6 +24,7 @@
     "canonicalize": "2.1.0"
   },
   "devDependencies": {
+    "@sohopay/signer-vectors": "^0.1.0",
     "@types/node": "^22.7.0",
     "tsx": "^4.20.5",
     "typescript": "^5.6.0"
