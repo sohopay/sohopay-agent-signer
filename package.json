@@ -24,7 +24,7 @@
   "dependencies": {
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.4.0",
-    "@sohopay/signer-vectors": "^0.1.0",
+    "@sohopay/signer-vectors": "^0.2.0",
     "canonicalize": "2.1.0"
   },
   "devDependencies": {

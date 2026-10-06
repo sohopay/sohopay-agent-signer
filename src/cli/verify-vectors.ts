@@ -94,6 +94,8 @@ export function verifyVectors(doc: any = loadVectors()): VerifySummary {
   for (const v of doc.vectors.envelope) {
     const { headerName, headerValue } = buildPaymentSignatureHeader(v.input.prepareResponse, v.input.signature);
     check(`env-name:${v.id}`, headerName, v.expected.headerName);
+    // Normative byte-exact header_value (standard base64 of the compact completed envelope).
+    check(`env-value:${v.id}`, headerValue, v.expected.headerValue);
     check(
       `env-decoded:${v.id}`,
       JSON.parse(Buffer.from(headerValue, "base64").toString("utf8")),
