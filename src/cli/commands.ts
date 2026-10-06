@@ -11,6 +11,7 @@ import {
   type AgentPaymentVoucherCore,
 } from "../voucher.js";
 import { readKeyFile, resolveKeyBlock, type ResolvedKey } from "./io.js";
+import { verifyVectors } from "./verify-vectors.js";
 
 /** Reads this package's version from package.json, relative to the module. */
 export function implementationVersion(): string {
@@ -132,5 +133,14 @@ export function popSignResult(
     implementation_version: implementationVersion(),
     pop_signature,
     algorithm: SUPPORTED_SIGNING.algorithm,
+  };
+}
+
+/** `verify-vectors → ({ passed, failed, total }, ok)`; ok drives the exit code. */
+export function verifyVectorsResult(): { result: Record<string, unknown>; ok: boolean } {
+  const summary = verifyVectors();
+  return {
+    result: { passed: summary.passed, failed: summary.failed, total: summary.total },
+    ok: summary.failed === 0,
   };
 }

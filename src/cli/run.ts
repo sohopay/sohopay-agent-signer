@@ -1,5 +1,5 @@
 import { parseArgs, UsageError } from "./args.js";
-import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, voucherSignResult } from "./commands.js";
+import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, verifyVectorsResult, voucherSignResult } from "./commands.js";
 import { readInput } from "./io.js";
 import { SignerError } from "../errors.js";
 
@@ -52,6 +52,10 @@ export function run(argv: string[], stdin: string): CliResult {
       case "pop sign":
         result = popSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
         break;
+      case "verify-vectors": {
+        const { result: summary, ok } = verifyVectorsResult();
+        return { stdout: format(summary, parsed.output), stderr: "", exitCode: ok ? 0 : 1 };
+      }
       default:
         // Later tasks add the signing/read commands here.
         throw new UsageError(`command not implemented: ${parsed.command}`);
