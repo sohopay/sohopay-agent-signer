@@ -213,3 +213,100 @@ sohopay-signer capabilities   [--output json]
 3. **`key gen` is out of SP2.** Keygen belongs with session-key provisioning, where
    custody is decided; a generic CLI keygen risks private keys landing in arbitrary
    places. The SDK retains programmatic keygen for provisioning flows.
+
+---
+
+## Amendment A — `voucher sign --envelope` + normative header serialization
+
+Status: approved in brainstorming 2026-10-06 (post-SP2-merge). Prerequisite for the
+SP5 voucher recipe: the CLI mode AND the republished vectors below must land before
+the SP5 recipe that depends on them merges.
+
+### Why
+
+SP5 skills route signing to the signer and fail closed; they must NOT improvise the
+`PAYMENT-SIGNATURE` serialization the facilitator decodes. Moving envelope-fill and
+header construction into the signer makes the **entire** header deterministic and
+vector-pinned, so no runtime (skill, bundle, Python) ever hand-builds it. The SDK
+already has `buildPaymentSignatureHeader`; this amendment exposes it through the CLI
+and pins its output in SP1 + vectors. It mostly formalizes existing behavior.
+
+### SP1 additions (contract)
+
+Normative `PAYMENT-SIGNATURE` serialization — the signer is the sole producer:
+
+- The **completed envelope** is the input x402 envelope (from `prepare_x402_payment`)
+  with exactly one field set — `paymentPayload.payload.signature` — and nothing else
+  added, removed, or re-ordered.
+- It is serialized with **compact** `JSON.stringify` (no inserted whitespace), UTF-8.
+- `header_value` = **standard base64 with `=` padding** (`Buffer.toString("base64")`),
+  explicitly NOT base64url. (base64url applies only to the Ed25519 voucher signature
+  that sits *inside* the envelope.)
+- `header_name` is passed through from the prepare response unchanged.
+
+Correctness is defined by the consumer contract: decoding `header_value` as base64 →
+UTF-8 → JSON MUST yield the prepare response's `envelope` with `…payload.signature`
+set to the produced signature and all other fields byte-for-byte equal. The compact +
+standard-base64 + preserve-order rules make a single canonical byte string so the
+vectors can pin it, but a conformant consumer parses JSON and does not depend on key
+order.
+
+`--envelope` output object adds, to the existing `voucher sign` fields
+(`signer_protocol`, `implementation`, `implementation_version`, `payment_id`,
+`agent_key_jkt`, `signature`, `algorithm`): `envelope` (the completed envelope object),
+`header_name`, `header_value`.
+
+### SP2 additions (CLI)
+
+New mode on the existing command:
+
+```
+sohopay-signer voucher sign --envelope --key <file> --input <file> [--write-header <path>] [--output json]
+```
+
+- `--input` is the **full `prepare_x402_payment` response** (`{ voucher, signing,
+  envelope, header_name }`), not the bare `{voucher, signing}` of the default mode.
+  Per SP5 it is written to a temp file and passed as `--input <file>`; the key stays an
+  opaque `--key <file>`.
+- The signer signs `voucher` (all existing fail-closed guards: paymentId recompute,
+  jkt match incl. the seed-only derivation, signing-scheme allowlist, all-string
+  fields), then fills **only** `paymentPayload.payload.signature` on a clone of the
+  input `envelope` via `buildPaymentSignatureHeader`.
+- **Guard — filled envelope:** if the input `envelope.paymentPayload.payload.signature`
+  is **non-null**, fail `MALFORMED_ENVELOPE` (never re-sign an already-filled envelope).
+- **Guard — payment_id cross-check:** the signed voucher's `paymentId` is cross-checked
+  against the prepare response's authoritative `payment_id` (the value the response
+  states, wherever it carries it); a mismatch is `PAYMENT_ID_MISMATCH`. (This is in
+  addition to `signVoucher`'s existing recompute-vs-`voucher.paymentId` check.)
+- **`--write-header <path>`** (optional): writes exactly the `header_value` bytes to
+  `<path>` for shell-based merchant retries; stdout is unchanged. Honors the same
+  no-secrets posture (header_value carries no key material).
+- The default `voucher sign` mode (no `--envelope`) is unchanged.
+
+### Vectors (`@sohopay/signer-vectors`, second repo)
+
+- Extend the existing `envelope` vector category with the normative `header_value`
+  string (standard base64 of the compact completed-envelope JSON) alongside the current
+  `headerName` + `decodedEnvelope` expectations.
+- Cut a new vectors version (minor bump), regenerate from the backend generator, and
+  **republish** to GitHub Packages. The SP5 recipe merge waits on this republish.
+- The CLI's `verify-vectors` then asserts `header_value` too (it already runs the
+  `envelope` category), so a divergent serializer is caught by the self-check.
+
+### Tests (subprocess, in the signer repo)
+
+- `--envelope` happy path: decode `header_value` → null the `…payload.signature` →
+  deep-equal the input `prepare.envelope`; `header_name` matches the input; the
+  `signature`/`payment_id`/`agent_key_jkt` match the `voucher sign` default mode and
+  the vector expectations.
+- Input `envelope` with a non-null signature → `MALFORMED_ENVELOPE`, exit 1.
+- Prepare `payment_id` ≠ the voucher's recomputed id → `PAYMENT_ID_MISMATCH`, exit 1.
+- `--write-header <path>` writes bytes identical to stdout's `header_value`.
+- `verify-vectors` still exits 0 with the new `header_value` expectation present.
+
+### Out of scope (Amendment A)
+
+- No change to `pop sign`, `payment-id`, `key jkt`, `capabilities`, or the default
+  `voucher sign` input/output.
+- No key generation/storage (still SP2 decision 3).
+- SP5 host detection/routing is specified in the SP5 design, not here.
