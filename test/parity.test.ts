@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -17,45 +17,72 @@ import {
   type AgentPaymentVoucher,
 } from "../src/voucher.js";
 
-/**
- * Single-source consumption during dev: the committed vectors live in the
- * backend repo. The publish cutover (last step) swaps this for the
- * `@sohopay/signer-vectors` package. Override with SIGNER_VECTORS_PATH.
- */
 const here = dirname(fileURLToPath(import.meta.url));
-const VECTORS_PATH =
-  process.env.SIGNER_VECTORS_PATH ??
-  join(here, "..", "..", "sohopay-backend", "packages", "signer-vectors", "vectors", "index.json");
+
+/**
+ * Resolve the parity vectors from, in order:
+ *   1. the published @sohopay/signer-vectors package (once it is a dependency),
+ *   2. an explicit SIGNER_VECTORS_PATH,
+ *   3. the sibling backend checkout (local dev).
+ * Returns undefined when none is available (e.g. CI before the dep is published),
+ * in which case the parity tests skip instead of failing to load.
+ */
+async function loadVectorsDoc(): Promise<unknown | undefined> {
+  // Non-literal specifier: don't make tsc resolve an optional, not-yet-added dep.
+  const pkg = "@sohopay/signer-vectors";
+  try {
+    const mod = (await import(pkg)) as { loadVectors?: () => unknown };
+    if (typeof mod.loadVectors === "function") {
+      return mod.loadVectors();
+    }
+  } catch {
+    // package not installed yet — fall through to a path.
+  }
+  const explicit = process.env.SIGNER_VECTORS_PATH;
+  const sibling = join(
+    here,
+    "..",
+    "..",
+    "sohopay-backend",
+    "packages",
+    "signer-vectors",
+    "vectors",
+    "index.json",
+  );
+  const path = explicit ?? (existsSync(sibling) ? sibling : undefined);
+  return path ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const doc: any = JSON.parse(readFileSync(VECTORS_PATH, "utf8"));
-const testKey = doc.testKeys[0];
+const doc: any = await loadVectorsDoc();
+const skip = doc ? false : "parity vectors unavailable (publish @sohopay/signer-vectors or set SIGNER_VECTORS_PATH)";
+const testKey = doc?.testKeys?.[0];
 
-test("contract matches SDK constants + exact canonicalize pin", () => {
+test("contract matches SDK constants + exact canonicalize pin", { skip }, () => {
   assert.equal(doc.contract.voucherDomainTag, VOUCHER_DOMAIN_TAG);
   assert.equal(doc.contract.canonicalize, "2.1.0");
 });
 
-test("jkt vectors reproduce", () => {
+test("jkt vectors reproduce", { skip }, () => {
   for (const v of doc.vectors.jkt) {
     assert.equal(computeJkt(v.input.publicJwk), v.expected.jkt, v.id);
   }
 });
 
-test("pop vectors reproduce (message bytes + signature)", () => {
+test("pop vectors reproduce (message bytes + signature)", { skip }, () => {
   for (const v of doc.vectors.pop) {
     assert.equal(toHex(buildPopChallengeMessage(v.input.fields)), v.expected.messageUtf8Hex, `${v.id} message`);
     assert.equal(signPoP(v.input.fields, testKey.seedB64Url).pop_signature, v.expected.popSignature, `${v.id} sig`);
   }
 });
 
-test("voucher paymentId vectors reproduce", () => {
+test("voucher paymentId vectors reproduce", { skip }, () => {
   for (const v of doc.vectors.voucherPaymentId) {
     assert.equal(computePaymentId(v.input.core), v.expected.paymentId, v.id);
   }
 });
 
-test("voucher signature vectors reproduce (preimage + signature)", () => {
+test("voucher signature vectors reproduce (preimage + signature)", { skip }, () => {
   for (const v of doc.vectors.voucherSignature) {
     const voucher = v.input.voucher as AgentPaymentVoucher;
     assert.equal(toHex(buildVoucherSignedBytes(voucher)), v.expected.preimageHex, `${v.id} preimage`);
@@ -69,7 +96,7 @@ test("voucher signature vectors reproduce (preimage + signature)", () => {
   }
 });
 
-test("envelope vectors reproduce (decoded deep-equal)", () => {
+test("envelope vectors reproduce (decoded deep-equal)", { skip }, () => {
   for (const v of doc.vectors.envelope) {
     const { headerName, headerValue } = buildPaymentSignatureHeader(
       v.input.prepareResponse,
@@ -81,7 +108,7 @@ test("envelope vectors reproduce (decoded deep-equal)", () => {
   }
 });
 
-test("negative guard vectors throw their code", () => {
+test("negative guard vectors throw their code", { skip }, () => {
   const code = (e: unknown, expected: string): boolean =>
     e instanceof SignerError && e.code === expected;
 
@@ -106,8 +133,7 @@ test("negative guard vectors throw their code", () => {
         assert.throws(() => computeJkt(v.input.publicJwk), (e) => code(e, v.expectError), v.id);
         break;
       default:
-        // cross-replay negatives are backend verify-only invariants (proven in
-        // the vectors); the SDK is a signer and does not verify, so skip them.
+        // cross-replay negatives are backend verify-only invariants.
         break;
     }
   }
