@@ -67,6 +67,18 @@ function assertSecurePermissions(path: string): void {
   }
 }
 
+/** Reads and parses a key file at an explicit path, refusing group/world-readable files. */
+export function loadKeyFile(path: string): unknown {
+  // Permissions are checked before the secret is read so a loosened file is never parsed.
+  assertSecurePermissions(path);
+  const raw = readFileSync(path, "utf8");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SignerError("STORED_KEY_CORRUPT", `${path} is not valid JSON`);
+  }
+}
+
 /**
  * Loads the stored key for a borrower, or `undefined` if none exists or it does
  * not match (borrower, and optionally jkt). Refuses to load a world/group

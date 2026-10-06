@@ -33,3 +33,9 @@ export const VOUCHER_CORE_FIELDS = [
   "nonce",
   "deadline",
 ] as const;
+
+/** SP1 protocol identifier — advertised by every conformant executable. */
+export const SIGNER_PROTOCOL = "sohopay-signer/1";
+
+/** This implementation's package name, stamped into machine output. */
+export const IMPLEMENTATION = "@sohopay/agent-signer";

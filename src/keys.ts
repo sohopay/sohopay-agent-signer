@@ -75,7 +75,22 @@ export function generateWorkloadKey(): WorkloadKeypair {
   return keypairFromSeed(ed25519.utils.randomPrivateKey());
 }
 
+/**
+ * Decodes a base64url Ed25519 private seed, asserting the 32-byte length so a
+ * malformed key fails with a specific code instead of a generic envelope error.
+ */
+export function decodeWorkloadSeed(privateKeyBase64Url: string): Uint8Array {
+  const seed = fromBase64Url(privateKeyBase64Url);
+  if (seed.length !== 32) {
+    throw new SignerError(
+      "INVALID_PRIVATE_KEY",
+      `Ed25519 private seed must be 32 bytes, got ${seed.length}`,
+    );
+  }
+  return seed;
+}
+
 /** Rehydrates the public half + jkt from a persisted private seed. */
 export function workloadKeyFromPrivate(privateKeyBase64Url: string): WorkloadKeypair {
-  return keypairFromSeed(fromBase64Url(privateKeyBase64Url));
+  return keypairFromSeed(decodeWorkloadSeed(privateKeyBase64Url));
 }

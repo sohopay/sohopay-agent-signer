@@ -10,6 +10,9 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "sohopay-signer": "dist/cli/index.js"
+  },
   "files": [
     "dist"
   ],
@@ -21,10 +24,10 @@
   "dependencies": {
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.4.0",
+    "@sohopay/signer-vectors": "^0.1.0",
     "canonicalize": "2.1.0"
   },
   "devDependencies": {
-    "@sohopay/signer-vectors": "^0.1.0",
     "@types/node": "^22.7.0",
     "tsx": "^4.20.5",
     "typescript": "^5.6.0"
