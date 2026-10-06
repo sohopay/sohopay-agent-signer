@@ -1,5 +1,6 @@
 import { parseArgs, UsageError } from "./args.js";
-import { capabilitiesResult } from "./commands.js";
+import { capabilitiesResult, keyJktResult, paymentIdResult } from "./commands.js";
+import { readInput } from "./io.js";
 import { SignerError } from "../errors.js";
 
 export interface CliResult {
@@ -34,6 +35,12 @@ export function run(argv: string[], _stdin: string): CliResult {
     switch (parsed.command) {
       case "capabilities":
         result = capabilitiesResult();
+        break;
+      case "payment-id":
+        result = paymentIdResult(readInput(parsed.input, _stdin));
+        break;
+      case "key jkt":
+        result = keyJktResult(readInput(parsed.input, _stdin));
         break;
       default:
         // Later tasks add the signing/read commands here.
