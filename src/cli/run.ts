@@ -1,5 +1,5 @@
 import { parseArgs, UsageError } from "./args.js";
-import { capabilitiesResult, keyJktResult, paymentIdResult } from "./commands.js";
+import { capabilitiesResult, keyJktResult, paymentIdResult, voucherSignResult } from "./commands.js";
 import { readInput } from "./io.js";
 import { SignerError } from "../errors.js";
 
@@ -27,9 +27,13 @@ function format(result: Record<string, unknown>, output: "json" | "human"): stri
  * mapped to a CliResult. Usage errors exit 2 (plain stderr); SignerError and
  * other operational failures exit 1 with a machine error envelope on stderr.
  */
-export function run(argv: string[], _stdin: string): CliResult {
+export function run(argv: string[], stdin: string): CliResult {
   try {
     const parsed = parseArgs(argv);
+
+    if (parsed.input === "-" && parsed.key === "-") {
+      throw new UsageError("--input and --key cannot both read stdin");
+    }
 
     let result: Record<string, unknown>;
     switch (parsed.command) {
@@ -37,10 +41,13 @@ export function run(argv: string[], _stdin: string): CliResult {
         result = capabilitiesResult();
         break;
       case "payment-id":
-        result = paymentIdResult(readInput(parsed.input, _stdin));
+        result = paymentIdResult(readInput(parsed.input, stdin));
         break;
       case "key jkt":
-        result = keyJktResult(readInput(parsed.input, _stdin));
+        result = keyJktResult(readInput(parsed.input, stdin));
+        break;
+      case "voucher sign":
+        result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
         break;
       default:
         // Later tasks add the signing/read commands here.

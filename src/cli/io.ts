@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { UsageError } from "./args.js";
 import { SignerError } from "../errors.js";
 import { assertPublicJwk, type Ed25519PublicJwk } from "../keys.js";
+import { loadKeyFile } from "../storage.js";
 
 /** A key block coerced to the SDK's camelCase argument names. */
 export interface ResolvedKey {
@@ -54,4 +55,19 @@ export function resolveKeyBlock(block: unknown): ResolvedKey {
     resolved.publicJwk = assertPublicJwk(record.public_jwk);
   }
   return resolved;
+}
+
+/** Reads a key JSON file (or "-" = stdin) into a ResolvedKey. */
+export function readKeyFile(source: string, stdin: string): ResolvedKey {
+  if (source === "-") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdin);
+    } catch {
+      throw new SignerError("MALFORMED_ENVELOPE", "key file is not valid JSON");
+    }
+    return resolveKeyBlock(parsed);
+  }
+  // Delegates to the permission-checked read so a loosened file is refused.
+  return resolveKeyBlock(loadKeyFile(source));
 }

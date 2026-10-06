@@ -3,8 +3,13 @@ import { readFileSync } from "node:fs";
 import { IMPLEMENTATION, SIGNER_PROTOCOL, SUPPORTED_SIGNING } from "../constants.js";
 import { SignerError } from "../errors.js";
 import { computeJkt, workloadKeyFromPrivate } from "../keys.js";
-import { computePaymentId, type AgentPaymentVoucherCore } from "../voucher.js";
-import { resolveKeyBlock } from "./io.js";
+import {
+  computePaymentId,
+  signVoucher,
+  type AgentPaymentVoucher,
+  type AgentPaymentVoucherCore,
+} from "../voucher.js";
+import { readKeyFile, resolveKeyBlock, type ResolvedKey } from "./io.js";
 
 /** Reads this package's version from package.json, relative to the module. */
 export function implementationVersion(): string {
@@ -48,4 +53,57 @@ export function keyJktResult(input: unknown): Record<string, unknown> {
     return { agent_key_jkt: workloadKeyFromPrivate(key.privateKeyBase64Url).jkt };
   }
   throw new SignerError("MALFORMED_ENVELOPE", "key jkt requires public_jwk or a key with private/public material");
+}
+
+/** Resolves the signing key from exactly one source: inline `input.key` or --key. */
+export function resolveSigningKey(
+  input: Record<string, unknown>,
+  keyFileSource: string | undefined,
+  stdin: string,
+): ResolvedKey {
+  const inline = input.key;
+  if (inline !== undefined && keyFileSource !== undefined) {
+    throw new SignerError("MALFORMED_ENVELOPE", "provide the key inline OR via --key, not both");
+  }
+  if (keyFileSource !== undefined) {
+    return readKeyFile(keyFileSource, stdin);
+  }
+  if (inline !== undefined) {
+    return resolveKeyBlock(inline);
+  }
+  throw new SignerError("MALFORMED_ENVELOPE", "signing requires a key (inline `key` or --key)");
+}
+
+/** `{ voucher, signing?, key? } (+ optional --key) → signed result`. */
+export function voucherSignResult(
+  input: unknown,
+  keyFileSource: string | undefined,
+  stdin: string,
+): Record<string, unknown> {
+  const record = (input ?? {}) as Record<string, unknown>;
+  const voucher = record.voucher as AgentPaymentVoucher | undefined;
+  if (voucher === null || typeof voucher !== "object") {
+    throw new SignerError("MALFORMED_ENVELOPE", "voucher sign requires a `voucher` object");
+  }
+  const key = resolveSigningKey(record, keyFileSource, stdin);
+  if (!key.privateKeyBase64Url) {
+    throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
+  }
+
+  const { signature } = signVoucher({
+    voucher,
+    privateKeyBase64Url: key.privateKeyBase64Url,
+    signing: record.signing as never,
+    publicJwk: key.publicJwk,
+  });
+
+  return {
+    signer_protocol: SIGNER_PROTOCOL,
+    implementation: IMPLEMENTATION,
+    implementation_version: implementationVersion(),
+    payment_id: voucher.paymentId,
+    agent_key_jkt: voucher.agentKeyJkt,
+    signature,
+    algorithm: SUPPORTED_SIGNING.algorithm,
+  };
 }
