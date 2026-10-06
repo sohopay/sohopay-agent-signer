@@ -92,6 +92,11 @@ export function verifyVectors(doc: any = loadVectors()): VerifySummary {
     );
   }
   for (const v of doc.vectors.envelope) {
+    // env-value derives both sides from v.input.prepareResponse via the same
+    // fill-signature → compact-JSON → base64 transform, so it pins this runtime's
+    // SERIALIZATION (key order, padding) byte-for-byte across languages — it does
+    // NOT attest the envelope's shape/completeness; that correctness is owned by
+    // the backend vector generator that produced prepareResponse + headerValue.
     const { headerName, headerValue } = buildPaymentSignatureHeader(v.input.prepareResponse, v.input.signature);
     check(`env-name:${v.id}`, headerName, v.expected.headerName);
     // Normative byte-exact header_value (standard base64 of the compact completed envelope).
