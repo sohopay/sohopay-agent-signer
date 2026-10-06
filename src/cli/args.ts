@@ -70,3 +70,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   return { command, input, key, output };
 }
+
+/** True when this invocation reads stdin — "-" is the only stdin sentinel (an --input/--key value). */
+export function needsStdin(argv: string[]): boolean {
+  return argv.includes("-");
+}

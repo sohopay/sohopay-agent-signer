@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
-import { parseArgs, UsageError } from "../src/cli/args.js";
+import { needsStdin, parseArgs, UsageError } from "../src/cli/args.js";
 import { run } from "../src/cli/run.js";
 
 test("parseArgs reads a two-token command plus flags", () => {
@@ -55,4 +55,10 @@ test("the real bin pipes capabilities over stdio (subprocess smoke)", () => {
   });
   assert.equal(r.status, 0);
   assert.equal(JSON.parse(r.stdout).signer_protocol, "sohopay-signer/1");
+});
+
+test("needsStdin is false for a no-input command and true when a '-' source is present", () => {
+  assert.equal(needsStdin(["capabilities"]), false);
+  assert.equal(needsStdin(["payment-id", "--input", "-"]), true);
+  assert.equal(needsStdin(["voucher", "sign", "--key", "-"]), true);
 });
