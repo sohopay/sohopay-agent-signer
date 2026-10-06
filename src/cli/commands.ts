@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { IMPLEMENTATION, SIGNER_PROTOCOL, SUPPORTED_SIGNING } from "../constants.js";
+import { buildPaymentSignatureHeader } from "../envelope.js";
 import { SignerError } from "../errors.js";
 import { computeJkt, decodeWorkloadSeed, workloadKeyFromPrivate } from "../keys.js";
 import { signPoP, type PopChallengeFields } from "../pop.js";
@@ -117,6 +118,92 @@ export function voucherSignResult(
     agent_key_jkt: voucher.agentKeyJkt,
     signature,
     algorithm: SUPPORTED_SIGNING.algorithm,
+  };
+}
+
+/**
+ * `--envelope`: `{ voucher, signing?, envelope, header_name, key? } (+ optional --key)`
+ * -> signed result plus the completed x402 envelope and PAYMENT-SIGNATURE header.
+ * Fills ONLY paymentPayload.payload.signature; never re-signs a filled envelope.
+ */
+export function voucherSignEnvelopeResult(
+  input: unknown,
+  keyFileSource: string | undefined,
+  stdin: string,
+): Record<string, unknown> {
+  const record = (input ?? {}) as Record<string, unknown>;
+
+  const voucher = record.voucher as AgentPaymentVoucher | undefined;
+  if (voucher === null || typeof voucher !== "object") {
+    throw new SignerError("MALFORMED_ENVELOPE", "voucher sign --envelope requires a `voucher` object");
+  }
+
+  const prepareEnvelope = record.envelope;
+  if (prepareEnvelope === null || typeof prepareEnvelope !== "object") {
+    throw new SignerError("MALFORMED_ENVELOPE", "voucher sign --envelope requires an `envelope` object");
+  }
+
+  const headerName = record.header_name;
+  if (typeof headerName !== "string" || headerName.length === 0) {
+    throw new SignerError(
+      "MALFORMED_ENVELOPE",
+      "voucher sign --envelope requires a non-empty string `header_name`",
+    );
+  }
+
+  const payload = (prepareEnvelope as {
+    paymentPayload?: { payload?: { signature?: unknown; voucher?: { paymentId?: unknown } } };
+  }).paymentPayload?.payload;
+  if (payload === null || typeof payload !== "object") {
+    throw new SignerError("MALFORMED_ENVELOPE", "input envelope is missing paymentPayload.payload");
+  }
+
+  // Guard: never re-sign an already-filled envelope.
+  if (payload.signature !== undefined && payload.signature !== null) {
+    throw new SignerError("MALFORMED_ENVELOPE", "input envelope already carries a signature");
+  }
+
+  // Guard: the voucher embedded in the envelope must be the voucher we sign (payment_id cross-check).
+  const embeddedPaymentId = payload.voucher?.paymentId;
+  if (typeof embeddedPaymentId !== "string") {
+    throw new SignerError(
+      "MALFORMED_ENVELOPE",
+      "input envelope is missing paymentPayload.payload.voucher.paymentId",
+    );
+  }
+  if (embeddedPaymentId !== voucher.paymentId) {
+    throw new SignerError(
+      "PAYMENT_ID_MISMATCH",
+      "voucher paymentId does not match the envelope's embedded voucher",
+    );
+  }
+
+  const key = resolveSigningKey(record, keyFileSource, stdin);
+  if (!key.privateKeyBase64Url) {
+    throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
+  }
+
+  const { signature } = signVoucher({
+    voucher,
+    privateKeyBase64Url: key.privateKeyBase64Url,
+    signing: record.signing as never,
+    // Derive the public key from the seed when absent so the jkt-binding guard always runs.
+    publicJwk: key.publicJwk ?? workloadKeyFromPrivate(key.privateKeyBase64Url).publicJwk,
+  });
+
+  const { headerValue, envelope } = buildPaymentSignatureHeader(prepareEnvelope, signature);
+
+  return {
+    signer_protocol: SIGNER_PROTOCOL,
+    implementation: IMPLEMENTATION,
+    implementation_version: implementationVersion(),
+    payment_id: voucher.paymentId,
+    agent_key_jkt: voucher.agentKeyJkt,
+    signature,
+    algorithm: SUPPORTED_SIGNING.algorithm,
+    envelope,
+    header_name: headerName,
+    header_value: headerValue,
   };
 }
 
