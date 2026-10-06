@@ -1,0 +1,34 @@
+{
+  "name": "@sohopay/agent-signer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic client-side signer for SohoPay Protocol V2 agent payments: Ed25519 vouchers, PoP challenges, RFC 7638 jkt. Holds agent workload keys only — never borrower keys.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "tsc --noEmit && npm run test"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.4.0",
+    "canonicalize": "2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
