@@ -94,3 +94,20 @@ test("a jkt that does not match the signing key fails AGENT_KEY_JKT_MISMATCH", (
   assert.equal(r.exitCode, 1);
   assert.equal(JSON.parse(r.stderr).error.code, "AGENT_KEY_JKT_MISMATCH");
 });
+
+test("a seed-only key whose jkt does not match the voucher fails AGENT_KEY_JKT_MISMATCH", () => {
+  const otherJkt = generateWorkloadKey().jkt;
+  const voucher = { ...vector.input.voucher, agentKeyJkt: otherJkt } as Record<string, unknown>;
+  const { paymentId: _p, agentKeyJkt: _j, ...core } = voucher;
+  const rebuilt = { ...voucher, paymentId: computePaymentId(core as never) };
+  const stdin = JSON.stringify({ voucher: rebuilt, key: { private_key_base64url: testKey.seedB64Url } });
+  const r = run(["voucher", "sign", "--input", "-", "--output", "json"], stdin);
+  assert.equal(r.exitCode, 1);
+  assert.equal(JSON.parse(r.stderr).error.code, "AGENT_KEY_JKT_MISMATCH");
+});
+
+test("--input - and --key - cannot both read stdin (usage error, exit 2)", () => {
+  const r = run(["voucher", "sign", "--input", "-", "--key", "-", "--output", "json"], "{}");
+  assert.equal(r.exitCode, 2);
+  assert.doesNotMatch(r.stderr, /"error"/);
+});

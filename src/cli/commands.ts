@@ -94,7 +94,8 @@ export function voucherSignResult(
     voucher,
     privateKeyBase64Url: key.privateKeyBase64Url,
     signing: record.signing as never,
-    publicJwk: key.publicJwk,
+    // Derive the public key from the seed when absent so the jkt-binding guard always runs.
+    publicJwk: key.publicJwk ?? workloadKeyFromPrivate(key.privateKeyBase64Url).publicJwk,
   });
 
   return {
