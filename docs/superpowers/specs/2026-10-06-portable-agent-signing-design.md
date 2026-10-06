@@ -278,9 +278,11 @@ sohopay-signer voucher sign --envelope --key <file> --input <file> [--write-head
   against the prepare response's authoritative `payment_id` (the value the response
   states, wherever it carries it); a mismatch is `PAYMENT_ID_MISMATCH`. (This is in
   addition to `signVoucher`'s existing recompute-vs-`voucher.paymentId` check.)
-- **`--write-header <path>`** (optional): writes exactly the `header_value` bytes to
-  `<path>` for shell-based merchant retries; stdout is unchanged. Honors the same
-  no-secrets posture (header_value carries no key material).
+- **`--write-header <path>`** (optional): writes a curl-ready header line
+  `<header_name>: <header_value>\n` to `<path>`, so a shell-based merchant retry is
+  `curl -H @<path>` with the signed value never entering a shell argument or the model's
+  context; stdout is unchanged. Honors the same no-secrets posture (the signed voucher is
+  a replayable credential until expiry, but carries no key material).
 - The default `voucher sign` mode (no `--envelope`) is unchanged.
 
 ### Vectors (`@sohopay/signer-vectors`, second repo)
@@ -301,7 +303,7 @@ sohopay-signer voucher sign --envelope --key <file> --input <file> [--write-head
   the vector expectations.
 - Input `envelope` with a non-null signature → `MALFORMED_ENVELOPE`, exit 1.
 - Prepare `payment_id` ≠ the voucher's recomputed id → `PAYMENT_ID_MISMATCH`, exit 1.
-- `--write-header <path>` writes bytes identical to stdout's `header_value`.
+- `--write-header <path>` writes the curl-ready line `<header_name>: <header_value>\n`.
 - `verify-vectors` still exits 0 with the new `header_value` expectation present.
 
 ### Out of scope (Amendment A)

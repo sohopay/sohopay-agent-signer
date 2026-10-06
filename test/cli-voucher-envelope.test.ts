@@ -118,7 +118,7 @@ test("--write-header without --envelope is a usage error (exit 2)", () => {
   assert.doesNotMatch(r.stderr, /"error"/);
 });
 
-test("--write-header writes exactly the stdout header_value bytes (no newline)", () => {
+test("--write-header writes a curl-ready `<name>: <value>` header line", () => {
   const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
   const headerPath = join(dir, "header.txt");
   const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
@@ -129,8 +129,9 @@ test("--write-header writes exactly the stdout header_value bytes (no newline)",
   assert.equal(r.exitCode, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   const fileBytes = readFileSync(headerPath, "utf8");
-  assert.equal(fileBytes, out.header_value);
-  assert.ok(!fileBytes.endsWith("\n"), "header file must not have a trailing newline");
+  // Exactly one header line, terminated by \n, so `curl -H @<file>` replays it
+  // without the value ever entering a shell argument or the model's context.
+  assert.equal(fileBytes, `${out.header_name}: ${out.header_value}\n`);
 });
 
 test("an unwritable --write-header path is MALFORMED_ENVELOPE with no stdout", () => {

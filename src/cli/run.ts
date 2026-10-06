@@ -59,14 +59,16 @@ export function run(argv: string[], stdin: string): CliResult {
         if (parsed.envelope) {
           result = voucherSignEnvelopeResult(readInput(parsed.input, stdin), parsed.key, stdin);
           if (parsed.writeHeader !== undefined) {
+            const headerName = result.header_name;
             const headerValue = result.header_value;
-            if (typeof headerValue !== "string") {
-              throw new SignerError("MALFORMED_ENVELOPE", "internal: header_value missing");
+            if (typeof headerName !== "string" || typeof headerValue !== "string") {
+              throw new SignerError("MALFORMED_ENVELOPE", "internal: header fields missing");
             }
-            // Write the exact header bytes (no trailing newline) BEFORE stdout, so a
-            // failed write never leaves a mismatched stdout behind.
+            // Write a curl-ready header line ("<name>: <value>\n") BEFORE stdout, so the
+            // value can be replayed with `curl -H @<file>` without ever entering a shell
+            // argument or the model's context, and a failed write leaves no mismatched stdout.
             try {
-              writeFileSync(parsed.writeHeader, headerValue, "utf8");
+              writeFileSync(parsed.writeHeader, `${headerName}: ${headerValue}\n`, "utf8");
             } catch {
               throw new SignerError("MALFORMED_ENVELOPE", `cannot write header file: ${parsed.writeHeader}`);
             }
