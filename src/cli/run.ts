@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 
 import { parseArgs, UsageError } from "./args.js";
 import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, verifyVectorsResult, voucherSignEnvelopeResult, voucherSignResult } from "./commands.js";
@@ -73,6 +73,10 @@ export function run(argv: string[], stdin: string): CliResult {
                 encoding: "utf8",
                 mode: 0o600,
               });
+              // writeFileSync's `mode` is honored only when it creates the file; a
+              // pre-existing path keeps its old (possibly world-readable) perms, so
+              // tighten unconditionally — the line is a replayable credential.
+              chmodSync(parsed.writeHeader, 0o600);
             } catch {
               throw new SignerError("MALFORMED_ENVELOPE", `cannot write header file: ${parsed.writeHeader}`);
             }
