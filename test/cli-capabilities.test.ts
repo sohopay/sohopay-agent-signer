@@ -26,6 +26,17 @@ test("parseArgs throws UsageError when a flag is missing its value", () => {
   assert.throws(() => parseArgs(["capabilities", "--output"]), UsageError);
 });
 
+test("parseArgs accepts the --flag=value form", () => {
+  const p = parseArgs(["payment-id", "--input=-", "--output=json"]);
+  assert.equal(p.command, "payment-id");
+  assert.equal(p.input, "-");
+  assert.equal(p.output, "json");
+});
+
+test("parseArgs rejects an unexpected extra positional", () => {
+  assert.throws(() => parseArgs(["capabilities", "extra"]), UsageError);
+});
+
 test("capabilities (json) reports sohopay-signer/1 and the command set", () => {
   const r = run(["capabilities", "--output", "json"], "");
   assert.equal(r.exitCode, 0);

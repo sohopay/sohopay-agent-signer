@@ -5,6 +5,7 @@ import { loadVectors } from "@sohopay/signer-vectors";
 import { toHex } from "../encoding.js";
 import { SignerError } from "../errors.js";
 import { buildPaymentSignatureHeader } from "../envelope.js";
+import { jcs } from "../jcs.js";
 import { computeJkt } from "../keys.js";
 import { buildPopChallengeMessage, signPoP } from "../pop.js";
 import {
@@ -20,6 +21,17 @@ export interface VerifySummary {
   total: number;
   failures: string[];
 }
+
+/**
+ * Negative vectors that are backend-verify-only (cross-replay invariants): the
+ * client cannot reproduce them, so they are intentionally skipped here. Any
+ * negative id NOT handled by the switch and NOT in this set is treated as an
+ * unhandled new vector and fails, so coverage can never regress silently.
+ */
+const BACKEND_ONLY_NEGATIVES = new Set([
+  "neg-cross-replay-voucher-as-pop",
+  "neg-cross-replay-pop-as-voucher",
+]);
 
 /** Runs the full known-answer set in-process. A host calls this to self-certify. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,6 +62,11 @@ export function verifyVectors(doc: any = loadVectors()): VerifySummary {
     }
   };
 
+  for (const v of doc.vectors.jcs) {
+    // Standalone canonicalization, incl. the unicode/NUL edges the voucher
+    // payloads don't exercise — asserted directly so a JCS divergence surfaces.
+    check(`jcs:${v.id}`, jcs(v.input), v.expected.canonical);
+  }
   for (const v of doc.vectors.jkt) {
     check(`jkt:${v.id}`, computeJkt(v.input.publicJwk), v.expected.jkt);
   }
@@ -107,7 +124,12 @@ export function verifyVectors(doc: any = loadVectors()): VerifySummary {
         checkThrows(v.id, () => computeJkt(v.input.publicJwk), v.expectError);
         break;
       default:
-        // Cross-replay negatives are backend verify-only; not assertable here.
+        // Backend-only cross-replay invariants are skipped by design; anything
+        // else is a new negative vector this client doesn't yet assert — fail so
+        // it is noticed rather than silently uncovered.
+        if (!BACKEND_ONLY_NEGATIVES.has(v.id)) {
+          failures.push(`${v.id}:unhandled-negative`);
+        }
         break;
     }
   }

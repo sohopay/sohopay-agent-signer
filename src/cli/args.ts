@@ -40,19 +40,30 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
-    if (token === "--input") {
-      input = requireValue(argv, ++i, "--input");
-    } else if (token === "--key") {
-      key = requireValue(argv, ++i, "--key");
-    } else if (token === "--output") {
-      const value = requireValue(argv, ++i, "--output");
-      if (value !== "json" && value !== "human") {
-        throw new UsageError(`--output must be "json" or "human", got "${value}"`);
+    if (token === undefined) {
+      continue;
+    }
+    if (token.startsWith("--")) {
+      // Accept both `--flag value` and `--flag=value`.
+      const eq = token.indexOf("=");
+      const name = eq === -1 ? token : token.slice(0, eq);
+      const inlineValue = eq === -1 ? undefined : token.slice(eq + 1);
+      const valueOf = (flag: string): string =>
+        inlineValue ?? requireValue(argv, ++i, flag);
+      if (name === "--input") {
+        input = valueOf("--input");
+      } else if (name === "--key") {
+        key = valueOf("--key");
+      } else if (name === "--output") {
+        const value = valueOf("--output");
+        if (value !== "json" && value !== "human") {
+          throw new UsageError(`--output must be "json" or "human", got "${value}"`);
+        }
+        output = value;
+      } else {
+        throw new UsageError(`unknown flag: ${name}`);
       }
-      output = value;
-    } else if (token !== undefined && token.startsWith("--")) {
-      throw new UsageError(`unknown flag: ${token}`);
-    } else if (token !== undefined) {
+    } else {
       positionals.push(token);
     }
   }
@@ -60,18 +71,27 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const twoToken = positionals.slice(0, 2).join(" ");
   const oneToken = positionals[0] ?? "";
   let command: string;
+  let commandTokens: number;
   if (KNOWN_COMMANDS.has(twoToken)) {
     command = twoToken;
+    commandTokens = 2;
   } else if (KNOWN_COMMANDS.has(oneToken)) {
     command = oneToken;
+    commandTokens = 1;
   } else {
     throw new UsageError(`unknown command: ${positionals.join(" ") || "(none)"}`);
+  }
+
+  if (positionals.length > commandTokens) {
+    throw new UsageError(`unexpected argument: ${positionals[commandTokens]}`);
   }
 
   return { command, input, key, output };
 }
 
-/** True when this invocation reads stdin — "-" is the only stdin sentinel (an --input/--key value). */
+/** True when this invocation reads stdin — "-" is the stdin sentinel for --input/--key (space- or `=`-separated). */
 export function needsStdin(argv: string[]): boolean {
-  return argv.includes("-");
+  return argv.some(
+    (token) => token === "-" || token === "--input=-" || token === "--key=-",
+  );
 }

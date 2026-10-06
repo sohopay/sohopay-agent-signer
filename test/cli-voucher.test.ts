@@ -111,3 +111,13 @@ test("--input - and --key - cannot both read stdin (usage error, exit 2)", () =>
   assert.equal(r.exitCode, 2);
   assert.doesNotMatch(r.stderr, /"error"/);
 });
+
+test("a wrong-length private seed fails INVALID_PRIVATE_KEY (not MALFORMED_ENVELOPE)", () => {
+  const stdin = JSON.stringify({
+    voucher: vector.input.voucher,
+    key: { private_key_base64url: "AAAA" }, // 3 bytes, not a 32-byte Ed25519 seed
+  });
+  const r = run(["voucher", "sign", "--input", "-", "--output", "json"], stdin);
+  assert.equal(r.exitCode, 1);
+  assert.equal(JSON.parse(r.stderr).error.code, "INVALID_PRIVATE_KEY");
+});

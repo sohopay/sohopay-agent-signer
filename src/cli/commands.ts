@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { IMPLEMENTATION, SIGNER_PROTOCOL, SUPPORTED_SIGNING } from "../constants.js";
 import { SignerError } from "../errors.js";
-import { computeJkt, workloadKeyFromPrivate } from "../keys.js";
+import { computeJkt, decodeWorkloadSeed, workloadKeyFromPrivate } from "../keys.js";
 import { signPoP, type PopChallengeFields } from "../pop.js";
 import {
   computePaymentId,
@@ -67,13 +67,22 @@ export function resolveSigningKey(
   if (inline !== undefined && keyFileSource !== undefined) {
     throw new SignerError("MALFORMED_ENVELOPE", "provide the key inline OR via --key, not both");
   }
+  let key: ResolvedKey;
   if (keyFileSource !== undefined) {
-    return readKeyFile(keyFileSource, stdin);
+    key = readKeyFile(keyFileSource, stdin);
+  } else if (inline !== undefined) {
+    key = resolveKeyBlock(inline);
+  } else {
+    throw new SignerError("MALFORMED_ENVELOPE", "signing requires a key (inline `key` or --key)");
   }
-  if (inline !== undefined) {
-    return resolveKeyBlock(inline);
+
+  // Validate the seed here so a malformed key surfaces as INVALID_PRIVATE_KEY on
+  // every signing path — even when a public_jwk is supplied and the SDK would
+  // otherwise only decode the seed deep inside ed25519.sign.
+  if (key.privateKeyBase64Url !== undefined) {
+    decodeWorkloadSeed(key.privateKeyBase64Url);
   }
-  throw new SignerError("MALFORMED_ENVELOPE", "signing requires a key (inline `key` or --key)");
+  return key;
 }
 
 /** `{ voucher, signing?, key? } (+ optional --key) → signed result`. */

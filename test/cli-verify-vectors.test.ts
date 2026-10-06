@@ -38,3 +38,22 @@ test("verifyVectors fails a negative vector whose expected code is wrong", () =>
   const summary = verifyVectors(doc);
   assert.ok(summary.failures.some((f: string) => f.startsWith("neg-pop-iat-float")));
 });
+
+test("verifyVectors asserts the jcs category (canonicalization is reproduced)", () => {
+  const summary = verifyVectors();
+  assert.ok(summary.failures.length === 0);
+  // Corrupting a jcs expected value must now surface as a failure.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const doc = structuredClone(loadVectors()) as any;
+  doc.vectors.jcs[0].expected.canonical = "{}";
+  const corrupted = verifyVectors(doc);
+  assert.ok(corrupted.failures.some((f: string) => f.startsWith("jcs:")));
+});
+
+test("verifyVectors fails an unrecognized negative vector instead of silently skipping", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const doc = structuredClone(loadVectors()) as any;
+  doc.negative.push({ id: "neg-made-up", category: "jkt", expectError: "WHATEVER" });
+  const summary = verifyVectors(doc);
+  assert.ok(summary.failures.includes("neg-made-up:unhandled-negative"));
+});
