@@ -150,6 +150,15 @@ export function voucherSignEnvelopeResult(
       "voucher sign --envelope requires a non-empty string `header_name`",
     );
   }
+  // header_name is emitted into a curl-ready header line ("<name>: <value>\n"), so it
+  // must be a valid HTTP field-name (RFC 7230 token) — no CR/LF, colon, space, or control
+  // chars that could inject a second header. Fail closed on anything else.
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(headerName)) {
+    throw new SignerError(
+      "MALFORMED_ENVELOPE",
+      "header_name is not a valid HTTP header name",
+    );
+  }
 
   const payload = (prepareEnvelope as {
     paymentPayload?: { payload?: { signature?: unknown; voucher?: { paymentId?: unknown } } };

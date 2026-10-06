@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -153,4 +153,26 @@ test("an unwritable --write-header path is MALFORMED_ENVELOPE with no stdout", (
   assert.equal(r.exitCode, 1);
   assert.equal(r.stdout, "");
   assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
+});
+
+test("a header_name with CRLF (injection attempt) is MALFORMED_ENVELOPE", () => {
+  const prep = prepareResponse(vector.input.voucher) as Record<string, unknown>;
+  prep.header_name = "PAYMENT-SIGNATURE\r\nX-Injected: evil";
+  const stdin = JSON.stringify({ ...prep, key: key() });
+  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  assert.equal(r.exitCode, 1);
+  assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
+});
+
+test("--write-header creates the file with mode 0600", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
+  const headerPath = join(dir, "header.txt");
+  const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
+  const r = run(
+    ["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", "json"],
+    stdin,
+  );
+  assert.equal(r.exitCode, 0, r.stderr);
+  // Low 9 permission bits must be owner-only read/write (0o600).
+  assert.equal(statSync(headerPath).mode & 0o777, 0o600);
 });

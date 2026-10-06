@@ -68,7 +68,11 @@ export function run(argv: string[], stdin: string): CliResult {
             // value can be replayed with `curl -H @<file>` without ever entering a shell
             // argument or the model's context, and a failed write leaves no mismatched stdout.
             try {
-              writeFileSync(parsed.writeHeader, `${headerName}: ${headerValue}\n`, "utf8");
+              // mode 0600: the header line is a replayable credential until expiry.
+              writeFileSync(parsed.writeHeader, `${headerName}: ${headerValue}\n`, {
+                encoding: "utf8",
+                mode: 0o600,
+              });
             } catch {
               throw new SignerError("MALFORMED_ENVELOPE", `cannot write header file: ${parsed.writeHeader}`);
             }
