@@ -76,6 +76,81 @@ npm test          # parity suite (node --test)
 npm run build     # emit dist/
 ```
 
+## CLI (sohopay-signer)
+
+The package ships a `sohopay-signer` bin for shell-capable agent hosts. It is a
+thin wrapper over the SDK above and is protocol-versioned as `sohopay-signer/1`.
+
+```bash
+npx @sohopay/agent-signer capabilities --output json
+```
+
+### Machine interface
+
+- `--input -` reads a JSON object from **stdin**; `--output json` emits a single
+  JSON object to **stdout** and nothing else.
+- `stderr` is diagnostics only. **A non-zero exit means failure.**
+- Operational failures exit `1` with an error envelope on stderr:
+  ```json
+  { "error": { "code": "MALFORMED_ENVELOPE", "message": "..." } }
+  ```
+  Usage errors (unknown command or flag, missing flag value) exit `2` with a
+  plain one-line message.
+- The CLI holds **agent workload keys only**; it never touches a borrower key.
+  Supply the signing key inline in the stdin JSON (`"key": { "private_key_base64url": "...", "public_jwk": { ... } }`)
+  or with `--key <file>`, but not both. Prefer `--key` so the private seed stays
+  off the command line and out of shared stdin blobs. The seed is never logged.
+
+### Commands
+
+`voucher sign`: signs the voucher issued by `prepare_x402_payment`.
+
+```bash
+echo '{ "voucher": { ... }, "signing": { ... }, "key": { "private_key_base64url": "...", "public_jwk": { ... } } }' \
+  | sohopay-signer voucher sign --input - --output json
+# {"signer_protocol":"sohopay-signer/1","implementation":"@sohopay/agent-signer",
+#  "implementation_version":"0.x.y","payment_id":"0x...","agent_key_jkt":"...",
+#  "signature":"...","algorithm":"Ed25519"}
+```
+
+`payment-id`: recomputes the `paymentId` from a voucher core.
+
+```bash
+echo '{ "core": { ... } }' | sohopay-signer payment-id --input - --output json
+# {"payment_id":"0x..."}
+```
+
+`key jkt`: RFC 7638 thumbprint of a public JWK (or of the key derived from a seed).
+
+```bash
+echo '{ "public_jwk": { ... } }' | sohopay-signer key jkt --input - --output json
+# {"agent_key_jkt":"..."}
+```
+
+`pop sign`: signs the proof-of-possession challenge for key registration.
+
+```bash
+echo '{ "fields": { "borrowerId": "...", "terminalId": "...", "jkt": "...", "nonce": "...", "iat": 0 } }' \
+  | sohopay-signer pop sign --input - --key ./agent-key.json --output json
+# {"signer_protocol":"sohopay-signer/1","implementation":"@sohopay/agent-signer",
+#  "implementation_version":"0.x.y","pop_signature":"...","algorithm":"Ed25519"}
+```
+
+`verify-vectors`: runs the bundled known-answer vectors; exits `0` only if all pass.
+
+```bash
+sohopay-signer verify-vectors --output json
+# {"passed":N,"failed":0,"total":N}
+```
+
+`capabilities`: what host routing probes to confirm a usable signer.
+
+```bash
+sohopay-signer capabilities --output json
+# {"signer_protocol":"sohopay-signer/1","implementation":"@sohopay/agent-signer",
+#  "implementation_version":"0.x.y","algorithms":["Ed25519"],"commands":[...]}
+```
+
 ## License
 
 Proprietary — SohoPay. Not for distribution.
