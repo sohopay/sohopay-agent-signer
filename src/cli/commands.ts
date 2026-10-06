@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { IMPLEMENTATION, SIGNER_PROTOCOL, SUPPORTED_SIGNING } from "../constants.js";
 import { SignerError } from "../errors.js";
 import { computeJkt, workloadKeyFromPrivate } from "../keys.js";
+import { signPoP, type PopChallengeFields } from "../pop.js";
 import {
   computePaymentId,
   signVoucher,
@@ -105,6 +106,31 @@ export function voucherSignResult(
     payment_id: voucher.paymentId,
     agent_key_jkt: voucher.agentKeyJkt,
     signature,
+    algorithm: SUPPORTED_SIGNING.algorithm,
+  };
+}
+
+/** `{ fields, key? } (+ optional --key) → { pop_signature }`. */
+export function popSignResult(
+  input: unknown,
+  keyFileSource: string | undefined,
+  stdin: string,
+): Record<string, unknown> {
+  const record = (input ?? {}) as Record<string, unknown>;
+  const fields = record.fields;
+  if (fields === null || typeof fields !== "object") {
+    throw new SignerError("MALFORMED_ENVELOPE", "pop sign requires a `fields` object");
+  }
+  const key = resolveSigningKey(record, keyFileSource, stdin);
+  if (!key.privateKeyBase64Url) {
+    throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
+  }
+  const { pop_signature } = signPoP(fields as PopChallengeFields, key.privateKeyBase64Url);
+  return {
+    signer_protocol: SIGNER_PROTOCOL,
+    implementation: IMPLEMENTATION,
+    implementation_version: implementationVersion(),
+    pop_signature,
     algorithm: SUPPORTED_SIGNING.algorithm,
   };
 }

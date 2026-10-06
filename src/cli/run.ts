@@ -1,5 +1,5 @@
 import { parseArgs, UsageError } from "./args.js";
-import { capabilitiesResult, keyJktResult, paymentIdResult, voucherSignResult } from "./commands.js";
+import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, voucherSignResult } from "./commands.js";
 import { readInput } from "./io.js";
 import { SignerError } from "../errors.js";
 
@@ -48,6 +48,9 @@ export function run(argv: string[], stdin: string): CliResult {
         break;
       case "voucher sign":
         result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
+        break;
+      case "pop sign":
+        result = popSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
         break;
       default:
         // Later tasks add the signing/read commands here.
