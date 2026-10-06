@@ -1,5 +1,7 @@
+import { chmodSync, writeFileSync } from "node:fs";
+
 import { parseArgs, UsageError } from "./args.js";
-import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, verifyVectorsResult, voucherSignResult } from "./commands.js";
+import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, verifyVectorsResult, voucherSignEnvelopeResult, voucherSignResult } from "./commands.js";
 import { readInput } from "./io.js";
 import { SignerError } from "../errors.js";
 
@@ -35,6 +37,13 @@ export function run(argv: string[], stdin: string): CliResult {
       throw new UsageError("--input and --key cannot both read stdin");
     }
 
+    if ((parsed.envelope || parsed.writeHeader !== undefined) && parsed.command !== "voucher sign") {
+      throw new UsageError("--envelope and --write-header are only valid for `voucher sign`");
+    }
+    if (parsed.writeHeader !== undefined && !parsed.envelope) {
+      throw new UsageError("--write-header requires --envelope");
+    }
+
     let result: Record<string, unknown>;
     switch (parsed.command) {
       case "capabilities":
@@ -47,7 +56,34 @@ export function run(argv: string[], stdin: string): CliResult {
         result = keyJktResult(readInput(parsed.input, stdin));
         break;
       case "voucher sign":
-        result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
+        if (parsed.envelope) {
+          result = voucherSignEnvelopeResult(readInput(parsed.input, stdin), parsed.key, stdin);
+          if (parsed.writeHeader !== undefined) {
+            const headerName = result.header_name;
+            const headerValue = result.header_value;
+            if (typeof headerName !== "string" || typeof headerValue !== "string") {
+              throw new SignerError("MALFORMED_ENVELOPE", "internal: header fields missing");
+            }
+            // Write a curl-ready header line ("<name>: <value>\n") BEFORE stdout, so the
+            // value can be replayed with `curl -H @<file>` without ever entering a shell
+            // argument or the model's context, and a failed write leaves no mismatched stdout.
+            try {
+              // mode 0600: the header line is a replayable credential until expiry.
+              writeFileSync(parsed.writeHeader, `${headerName}: ${headerValue}\n`, {
+                encoding: "utf8",
+                mode: 0o600,
+              });
+              // writeFileSync's `mode` is honored only when it creates the file; a
+              // pre-existing path keeps its old (possibly world-readable) perms, so
+              // tighten unconditionally — the line is a replayable credential.
+              chmodSync(parsed.writeHeader, 0o600);
+            } catch {
+              throw new SignerError("MALFORMED_ENVELOPE", `cannot write header file: ${parsed.writeHeader}`);
+            }
+          }
+        } else {
+          result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
+        }
         break;
       case "pop sign":
         result = popSignResult(readInput(parsed.input, stdin), parsed.key, stdin);

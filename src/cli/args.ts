@@ -4,6 +4,8 @@ export interface ParsedArgs {
   input?: string;
   key?: string;
   output: "json" | "human";
+  envelope: boolean;
+  writeHeader?: string;
 }
 
 /** A caller mistake (unknown command/flag, missing value). Mapped to exit 2. */
@@ -37,6 +39,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let input: string | undefined;
   let key: string | undefined;
   let output: "json" | "human" = "human";
+  let envelope = false;
+  let writeHeader: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -60,6 +64,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
           throw new UsageError(`--output must be "json" or "human", got "${value}"`);
         }
         output = value;
+      } else if (name === "--envelope") {
+        envelope = true; // boolean flag; any inline value is ignored
+      } else if (name === "--write-header") {
+        writeHeader = valueOf("--write-header");
       } else {
         throw new UsageError(`unknown flag: ${name}`);
       }
@@ -86,7 +94,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UsageError(`unexpected argument: ${positionals[commandTokens]}`);
   }
 
-  return { command, input, key, output };
+  return { command, input, key, output, envelope, writeHeader };
 }
 
 /** True when this invocation reads stdin — "-" is the stdin sentinel for --input/--key (space- or `=`-separated). */

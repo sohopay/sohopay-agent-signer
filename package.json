@@ -1,6 +1,6 @@
 {
   "name": "@sohopay/agent-signer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Deterministic client-side signer for SohoPay Protocol V2 agent payments: Ed25519 vouchers, PoP challenges, RFC 7638 jkt. Holds agent workload keys only — never borrower keys.",
   "type": "module",
@@ -24,7 +24,7 @@
   "dependencies": {
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.4.0",
-    "@sohopay/signer-vectors": "^0.1.0",
+    "@sohopay/signer-vectors": "^0.2.0",
     "canonicalize": "2.1.0"
   },
   "devDependencies": {
