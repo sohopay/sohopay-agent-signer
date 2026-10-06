@@ -25,7 +25,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const VECTORS_PATH =
   process.env.SIGNER_VECTORS_PATH ??
-  join(here, "..", "..", "sohopay-backend", "test", "signer-vectors", "vectors", "index.json");
+  join(here, "..", "..", "sohopay-backend", "packages", "signer-vectors", "vectors", "index.json");
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const doc: any = JSON.parse(readFileSync(VECTORS_PATH, "utf8"));
