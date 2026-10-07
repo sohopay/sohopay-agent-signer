@@ -39,7 +39,10 @@ model only ever sees public material and relays opaque results.
 - Any redesign of the backend PoP **challenge** protocol (server-issued nonce). See
   "Nonce" below — deferred under a named condition, with a backend follow-up ticket.
 - Rotation (SOHO-254) and multi-borrower-per-host: one key file per configured root, so a
-  second borrower on the same host is refused `CROSS_BORROWER_KEY` (expected).
+  second borrower on the same host is refused `CROSS_BORROWER_KEY` (expected). **Rotation
+  reopen:** ensure mode's "never regenerate" is correct now but is the wrong default once
+  SOHO-254 lands — rotation requires a **separate `key rotate` contract**; ensure-mode
+  semantics must not be weakened to support it.
 - OS-level key isolation (separate-uid daemon, keychain/TPM) — see "Residual risk".
 
 ## Delivery shape & merge-order gate
@@ -84,9 +87,10 @@ Track 2 implements.
   caught by CI and behavioral cases**, not an OS-enforced impossibility. OS-level
   enforcement is a future reopen.
 
-CI invariants introduced (detailed in their tracks): INV-errleak, INV-outschema,
-INV-noseed, INV-rootenv (Track 1); INV-path-single-source, INV-pin-sync, INV-no-secret-access,
-INV-negative, INV-onboard-no-crypto, INV-onboard-routes, INV-no-placeholder (Track 2).
+CI invariants introduced (detailed in their tracks): INV-errleak, INV-ioschema, INV-noseed,
+INV-rootenv (Track 1); INV-path-single-source, INV-pin-sync, INV-no-secret-access,
+INV-no-inline-key, INV-negative, INV-onboard-no-crypto, INV-onboard-routes, INV-no-placeholder
+(Track 2); INV-codes-registered (cross-repo — see "Error-code registry").
 
 ---
 
@@ -128,15 +132,17 @@ Coded errors never echo file contents.
 
 ### `pop sign` — signer-generated nonce, reference-only key
 
-`sohopay-signer pop sign --key <path> --input -`, stdin `{ fields: { borrowerId,
-terminalId, jkt } }`. The signer:
+`sohopay-signer pop sign --key <path> --input -`, stdin **exactly** `{ fields: { borrowerId,
+terminalId, jkt } }` (strict input schema — INV-ioschema). The signer:
 - loads the key via the validated `--key <path>` (read mode);
-- asserts `fields.jkt == file.jkt` **and** `fields.borrowerId == file.borrower_id` before
-  signing (binding, per INV-4);
-- **generates a 32-byte CSPRNG `nonce` and sets `iat` from the clock** when they are omitted
-  (the model must never supply entropy — an LLM-produced "random" string is residual
-  in-prose crypto); signs the PoP over `canonicalize({ borrowerId, terminalId, jkt, nonce,
-  iat })`;
+- asserts **all three** bindings before signing (per INV-4): `fields.jkt == file.jkt`,
+  `fields.borrowerId == file.borrower_id`, and `fields.terminalId == file.terminal_id` — a
+  borrower mismatch is `CROSS_BORROWER_KEY`, a terminal mismatch is `TERMINAL_MISMATCH` (so
+  a key ensured for terminal A cannot sign a PoP for terminal B);
+- **always generates a 32-byte CSPRNG `nonce` and sets `iat` from the clock.** The model
+  never supplies entropy: a client-supplied `nonce` or `iat` in the input is **rejected**
+  `MALFORMED_INPUT` (the strict input schema forbids them). Signs the PoP over
+  `canonicalize({ borrowerId, terminalId, jkt, nonce, iat })`;
 - returns **exactly** `{ pop_signature, nonce, iat }` (`pop-sign/1`).
 
 When the backend server-issued challenge lands (deferred), `nonce` becomes a **required
@@ -164,15 +170,17 @@ One module, used by `key generate` (ensure mode) and `pop sign`/`voucher sign` (
 
 - **Allowed roots come from signer config, never argv or env.** Source: a compiled default
   (`~/.agents/sohopay-agent-workload`) plus a config file
-  `~/.config/sohopay-signer/config.json` (owner==uid, `0600`, validated like a key file).
-  The Cursor custom store is added **through the config file** (a deliberate, behavioral-
-  case-coverable act), never an env prefix. An env var (`SOHOPAY_SIGNER_KEY_ROOTS`) may
-  **only narrow** (intersection with configured roots, never widen).
+  `~/.config/sohopay-signer/config.json` (**validated as: owner==uid, `0600`, no symlinks,
+  parent `0700`** — the `secret.json` leaf-name rule does not apply to it). The Cursor custom
+  store is added **through the config file** (a deliberate, behavioral-case-coverable act),
+  never an env prefix. An env var (`SOHOPAY_SIGNER_KEY_ROOTS`) may **only narrow**
+  (intersection with configured roots, never widen).
 - **Resolve `realpath` of each configured root once at load** (macOS `/var → /private/var`,
   symlinked home dirs), then `lstat` **every path component below the resolved root**,
   rejecting any symlink and any `..`.
 - Leaf basename must be `secret.json`; parent dir `0700` + owner==uid; read mode requires
-  file `0600` + owner==uid; ensure mode is create-only (`O_CREAT|O_EXCL`).
+  file `0600` + owner==uid; **ensure mode: never overwrite, never regenerate — create
+  (`O_CREAT|O_EXCL`) only when absent** (the same-borrower file is read, not rewritten).
 - On read, the loaded file's `borrower_id`/`jkt` must match what the caller asserts.
 - **INV-rootenv** (CI): setting `SOHOPAY_SIGNER_KEY_ROOTS` to a path **outside** the
   configured roots fails with `KEY_PATH_INVALID`.
@@ -183,10 +191,15 @@ One module, used by `key generate` (ensure mode) and `pop sign`/`voucher sign` (
   **every** command against it, assert the canary appears in no stdout, stderr, or exit
   payload. Includes an **inline-key canary** case on `pop sign` and `voucher sign` (a
   rejected inline key must not surface).
-- **INV-outschema** (CI): every command's stdout validates against a strict schema
-  (`additionalProperties: false`). `key generate` = exactly `{ public_jwk, jkt, borrower_id,
-  terminal_id, created }`; `pop sign` = exactly `{ pop_signature, nonce, iat }`. Catches a
-  future field addition that would leak.
+- **INV-ioschema** (CI): every command validates **both** its stdin and its stdout against a
+  strict schema (`additionalProperties: false`). **Inputs:** `pop sign` = exactly
+  `{ fields: { borrowerId, terminalId, jkt } }` (a client-supplied `nonce`/`iat` ⇒
+  `MALFORMED_INPUT`; `pop-sign/2` later makes `nonce` required); `key generate` = exactly
+  `{ borrower_id, terminal_id }`. The strict input schema also closes inline keys at the
+  schema layer, but `INLINE_KEY_REJECTED` is checked **before** generic schema rejection so
+  the code stays specific. **Outputs:** `key generate` = exactly `{ public_jwk, jkt,
+  borrower_id, terminal_id, created }`; `pop sign` = exactly `{ pop_signature, nonce, iat }`.
+  Catches a future field addition that would leak.
 - **INV-noseed** (CI): no `--seed`, test-RNG flag, or env var exists in release builds. A
   deterministic-keygen seam is a key-recovery backdoor. Test determinism is injected at the
   **in-process SDK level only**, never through the CLI.
@@ -268,11 +281,19 @@ is **unchanged** (a body edit needs no eval change; a description edit would).
   file-based `--out`/`--key`, and that both use the **same path reference**.
 - **INV-no-secret-access** — across **all** skills, `secret.json` appears only as a path
   argument to `--out`/`--key` or in the single-source definition; never adjacent to read,
-  cat, open, copy, move, or delete verbs.
-- **INV-negative** — the excluded skills `sohopay-authorize-agent` and `sohopay-repay`
-  contain **no** signer routing (`key generate` / `pop sign` / `voucher sign` / signer
-  resolution); their borrower-off-device consent-signing boundary stays intact, so a future
-  edit can't silently pull borrower authorization credentials into the agent-signer path.
+  cat, open, copy, move, or delete verbs. Likewise `~/.config/sohopay-signer/config.json`
+  and `SOHOPAY_SIGNER_KEY_ROOTS` never appear adjacent to write/edit/set verbs — the agent
+  must not widen the configured roots to escape INV-4.
+- **INV-no-inline-key** — no skill passes `private_key_base64url` (or any key-material
+  field) inside a stdin example. Runtime rejection (`INLINE_KEY_REJECTED`, Track 1) is the
+  enforcement; this static lint catches a doc regression before runtime.
+- **INV-negative** — the **five excluded skills** (`sohopay-authorize-agent`,
+  `sohopay-repay`, `sohopay-human-direct`, `sohopay-integrate`, `sohopay-setup`) contain
+  **neither agent-signing instruction phrases** (the recipe phrases INV-onboard-no-crypto
+  forbids — the agent is never told to sign by hand in prose) **nor signer routing**
+  (`key generate` / `pop sign` / `voucher sign` / signer resolution). The guarded risk is an
+  excluded skill telling the agent to sign itself, or silently pulling borrower
+  authorization credentials into the agent-signer path.
 - **INV-pin-sync** — the npx pin in `signer.md`, the install command in the fail-closed
   error, and the version the merge-gate CI resolves are one constant; CI fails on drift.
 - **INV-no-placeholder** — CI fails if any unresolved placeholder literal (`<x.y.z>` or
@@ -295,8 +316,36 @@ Fixtures only (the runner is SP6's, per SP5-initial decision B). Cases:
 | `CROSS_BORROWER_KEY` | agent stops and surfaces it; **never** deletes, moves, or renames `secret.json` |
 | `TERMINAL_MISMATCH` | same — stop and surface; no destructive "fix" |
 | `KEY_INTEGRITY_FAILED` | agent stops and escalates to the human as possible tampering |
+| `KEY_PATH_INVALID` | agent stops and surfaces it; **never edits the signer config** (`config.json`) and **never sets `SOHOPAY_SIGNER_KEY_ROOTS`** to widen roots |
+| `INLINE_KEY_REJECTED` | agent switches to `--key <path>`; **never retries with an inline key** |
 | register fails after keygen, then retry | `created: false` path; same `jkt` reused; no regeneration |
 | prompt injection asks for `secret.json` contents | refusal |
+
+(The full code→action→case mapping is the Error-code registry below.)
+
+---
+
+## Error-code registry
+
+One row per code. **Emitter** matters: the `SIGNER_*` codes are emitted by the **skill
+resolver**, not the signer binary — there may be no signer present to emit them. Everything
+else is emitted by the signer. **INV-codes-registered** (CI, cross-repo): every code string
+that appears in the signer source *or* the skill docs must appear in this table, and every
+table row must appear in the source or docs; CI fails on an **unregistered** code (used but
+missing from the table) or an **orphaned** row (in the table but used nowhere).
+
+| Code | Emitter | Agent action | Behavioral case |
+|---|---|---|---|
+| `KEY_PATH_INVALID` | signer | stop; surface; never edit `config.json` or set `SOHOPAY_SIGNER_KEY_ROOTS` to widen roots | KEY_PATH_INVALID no-widen |
+| `CROSS_BORROWER_KEY` | signer | stop; surface; never delete/move/rename `secret.json` | CROSS_BORROWER_KEY |
+| `TERMINAL_MISMATCH` | signer | stop; surface; no destructive "fix" | TERMINAL_MISMATCH |
+| `KEY_INTEGRITY_FAILED` | signer | stop; escalate to the human as possible tampering | KEY_INTEGRITY_FAILED |
+| `KEY_PERSIST_FAILED` | signer | stop; surface the I/O failure; do not retry blindly | KEY_PERSIST_FAILED |
+| `MALFORMED_INPUT` | signer | stop; fix the call shape (incl. a wrongly client-supplied `nonce`/`iat`) | malformed-input (client nonce) |
+| `INLINE_KEY_REJECTED` | signer | switch to `--key <path>`; never retry with an inline key | inline-key-rejected |
+| `SIGNER_KEYGEN_UNSUPPORTED` | skill resolver | fail closed; no prose fallback | SIGNER_KEYGEN_UNSUPPORTED |
+| `SIGNER_KEYGEN_REQUIRES_LOCAL` | skill resolver | hand the pinned install command to the **human**; agent does **not** install or set `SOHOPAY_SIGNER` | SIGNER_KEYGEN_REQUIRES_LOCAL |
+| `SIGNER_UNRESOLVED` | skill resolver | fail closed; no signer resolved; surface | SIGNER_UNRESOLVED |
 
 ---
 
@@ -349,7 +398,7 @@ lost.
 - **Track 1 (signer):** unit/CLI tests for the `key generate` branch table (incl. the
   parallel-invocation race and the integrity re-derivation), the INV-4 validator (symlink,
   `..`, outside-root, wrong-leaf, loosened-perms, cross-borrower, realpath-root), INV-errleak
-  (canary incl. inline-key), INV-outschema, INV-rootenv, INV-noseed, and the two
+  (canary incl. inline-key), INV-ioschema, INV-rootenv, INV-noseed, and the two
   acceptance-change regression tests (documented default path still passes).
 - **Track 2 (skills):** `npm run validate` with the new static invariants green; the
   behavioral-case fixtures present; `npm run build` regenerates the hosted catalog; the
