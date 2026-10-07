@@ -1,0 +1,75 @@
+name: Release bundle
+
+on:
+  push:
+    tags: ["js-bundle-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "js-bundle-v<version> tag to release"
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@sohopay"
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert built version == tag version
+        env:
+          REF: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          ref="$REF"
+          tag_version="${ref#js-bundle-v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          echo "tag=$tag_version pkg=$pkg_version"
+          test "$tag_version" = "$pkg_version"
+
+      - name: Build + verify bundle
+        run: |
+          set -euo pipefail
+          npm run bundle
+          node --import tsx --test test/bundle-build.test.ts test/bundle-behavior.test.ts
+
+      - name: Cross-runner reproducibility (compare to a second clean build)
+        run: |
+          set -euo pipefail
+          other="$(mktemp -d)"
+          SOHOPAY_BUNDLE_OUTDIR="$other" node scripts/bundle.mjs
+          diff dist-bundle/sohopay-signer.mjs "$other/sohopay-signer.mjs"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist-bundle/sohopay-signer.mjs
+
+      - name: Create release with assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          ref="$REF"
+          gh release create "$ref" --verify-tag \
+            dist-bundle/sohopay-signer.mjs \
+            dist-bundle/sohopay-signer.mjs.sha256 \
+            dist-bundle/sohopay-signer.mjs.LEGAL.txt \
+            --title "$ref" \
+            --notes "Portable bundled JS signer ($ref). Verify: gh attestation verify sohopay-signer.mjs --repo sohopay/sohopay-agent-signer"

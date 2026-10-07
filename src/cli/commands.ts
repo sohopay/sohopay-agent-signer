@@ -14,12 +14,24 @@ import {
 import { readKeyFile, resolveKeyBlock, type ResolvedKey } from "./io.js";
 import { verifyVectors } from "./verify-vectors.js";
 
-/** Reads this package's version from package.json, relative to the module. */
+// ambient — esbuild `define` replaces this literal in the bundle; undefined in the tsc/tsx path
+declare const __SIGNER_IMPL_VERSION__: string | undefined;
+
+/** The signer's implementation version: build-injected in the bundle, else from package.json. */
 export function implementationVersion(): string {
+  if (typeof __SIGNER_IMPL_VERSION__ !== "undefined" && __SIGNER_IMPL_VERSION__) {
+    return __SIGNER_IMPL_VERSION__;
+  }
+  // Below is the tsc/tsx path only. In the esbuild bundle the `define` above makes the
+  // first branch always true, so this package.json read is dead there — its relative
+  // `../../package.json` URL would not resolve from the single-file bundle if ever reached.
   const pkg = JSON.parse(
     readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { version?: string };
-  return pkg.version ?? "0.0.0";
+  if (!pkg.version) {
+    throw new Error("implementation_version could not be resolved from package.json");
+  }
+  return pkg.version;
 }
 
 const COMMANDS = ["voucher sign", "payment-id", "key jkt", "pop sign", "verify-vectors", "capabilities"];
