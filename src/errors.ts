@@ -14,7 +14,14 @@ export type SignerErrorCode =
   | "INSECURE_KEY_PERMISSIONS"
   | "STORED_KEY_CORRUPT"
   | "IDEMPOTENCY_PAYLOAD_MISMATCH"
-  | "OPERATION_NOT_FOUND";
+  | "OPERATION_NOT_FOUND"
+  | "KEY_PATH_INVALID"
+  | "CROSS_BORROWER_KEY"
+  | "TERMINAL_MISMATCH"
+  | "KEY_INTEGRITY_FAILED"
+  | "KEY_PERSIST_FAILED"
+  | "INLINE_KEY_REJECTED"
+  | "MALFORMED_INPUT";
 
 /** All SDK-raised failures carry a stable `code` from {@link SignerErrorCode}. */
 export class SignerError extends Error {

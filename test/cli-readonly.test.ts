@@ -30,13 +30,13 @@ test("key jkt from a public_jwk reproduces computeJkt", () => {
   assert.equal(JSON.parse(r.stdout).agent_key_jkt, key.jkt);
 });
 
-test("key jkt from a private seed derives the same jkt", () => {
+test("key jkt from an inline private seed is INLINE_KEY_REJECTED (INV-3)", () => {
   const r = run(
     ["key", "jkt", "--input", "-", "--output", "json"],
     JSON.stringify({ key: { private_key_base64url: key.privateKeyBase64Url } }),
   );
-  assert.equal(r.exitCode, 0);
-  assert.equal(JSON.parse(r.stdout).agent_key_jkt, key.jkt);
+  assert.equal(r.exitCode, 1);
+  assert.equal(JSON.parse(r.stderr).error.code, "INLINE_KEY_REJECTED");
 });
 
 test("non-JSON stdin fails MALFORMED_ENVELOPE with exit 1 and no stack trace", () => {

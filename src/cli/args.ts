@@ -3,6 +3,7 @@ export interface ParsedArgs {
   command: string;
   input?: string;
   key?: string;
+  out?: string;
   output: "json" | "human";
   envelope: boolean;
   writeHeader?: string;
@@ -20,6 +21,7 @@ const KNOWN_COMMANDS = new Set([
   "voucher sign",
   "payment-id",
   "key jkt",
+  "key generate",
   "pop sign",
   "verify-vectors",
   "capabilities",
@@ -38,6 +40,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];
   let input: string | undefined;
   let key: string | undefined;
+  let out: string | undefined;
   let output: "json" | "human" = "human";
   let envelope = false;
   let writeHeader: string | undefined;
@@ -58,6 +61,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
         input = valueOf("--input");
       } else if (name === "--key") {
         key = valueOf("--key");
+      } else if (name === "--out") {
+        out = valueOf("--out");
       } else if (name === "--output") {
         const value = valueOf("--output");
         if (value !== "json" && value !== "human") {
@@ -94,7 +99,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UsageError(`unexpected argument: ${positionals[commandTokens]}`);
   }
 
-  return { command, input, key, output, envelope, writeHeader };
+  return { command, input, key, out, output, envelope, writeHeader };
 }
 
 /** True when this invocation reads stdin — "-" is the stdin sentinel for --input/--key (space- or `=`-separated). */

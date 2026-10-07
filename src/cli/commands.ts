@@ -1,16 +1,20 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { IMPLEMENTATION, SIGNER_PROTOCOL, SUPPORTED_SIGNING } from "../constants.js";
+import { toBase64Url } from "../encoding.js";
 import { buildPaymentSignatureHeader } from "../envelope.js";
 import { SignerError } from "../errors.js";
 import { computeJkt, decodeWorkloadSeed, workloadKeyFromPrivate } from "../keys.js";
-import { signPoP, type PopChallengeFields } from "../pop.js";
+import { signPoP } from "../pop.js";
 import {
   computePaymentId,
   signVoucher,
   type AgentPaymentVoucher,
   type AgentPaymentVoucherCore,
 } from "../voucher.js";
+import { loadKeyFile, type StoredWorkloadKey } from "../storage.js";
+import { validateKeyPath } from "./key-path.js";
 import { readKeyFile, resolveKeyBlock, type ResolvedKey } from "./io.js";
 import { verifyVectors } from "./verify-vectors.js";
 
@@ -34,7 +38,12 @@ export function implementationVersion(): string {
   return pkg.version;
 }
 
-const COMMANDS = ["voucher sign", "payment-id", "key jkt", "pop sign", "verify-vectors", "capabilities"];
+const COMMANDS = ["voucher sign", "payment-id", "key jkt", "key generate", "pop sign", "verify-vectors", "capabilities"];
+
+const COMMAND_CONTRACTS: Record<string, string> = {
+  "key generate": "workload-keygen/1",
+  "pop sign": "pop-sign/1",
+};
 
 /** Static advertisement SP5 routing probes to confirm a usable signer. */
 export function capabilitiesResult(): Record<string, unknown> {
@@ -44,6 +53,7 @@ export function capabilitiesResult(): Record<string, unknown> {
     implementation_version: implementationVersion(),
     algorithms: [SUPPORTED_SIGNING.algorithm],
     commands: COMMANDS,
+    command_contracts: COMMAND_CONTRACTS,
   };
 }
 
@@ -56,10 +66,15 @@ export function paymentIdResult(input: unknown): Record<string, unknown> {
   return { payment_id: computePaymentId(core as AgentPaymentVoucherCore) };
 }
 
+type KeyOpts = { homeDir?: string; env?: NodeJS.ProcessEnv };
+
 /** `{ public_jwk } | { key: { public_jwk | private_key_base64url } } → { agent_key_jkt }`. */
 export function keyJktResult(input: unknown): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
   const block = record.public_jwk !== undefined ? { public_jwk: record.public_jwk } : record.key;
+  if (block && typeof block === "object" && (block as Record<string, unknown>).private_key_base64url !== undefined) {
+    throw new SignerError("INLINE_KEY_REJECTED", "key jkt does not accept inline private key material; pass public_jwk");
+  }
   const key = resolveKeyBlock(block);
   if (key.publicJwk) {
     return { agent_key_jkt: computeJkt(key.publicJwk) };
@@ -70,24 +85,23 @@ export function keyJktResult(input: unknown): Record<string, unknown> {
   throw new SignerError("MALFORMED_ENVELOPE", "key jkt requires public_jwk or a key with private/public material");
 }
 
-/** Resolves the signing key from exactly one source: inline `input.key` or --key. */
+/**
+ * Resolves the signing key from a validated `--key <path>` file only. Inline key
+ * material is rejected first (INV-3) so a secret never travels through input JSON.
+ */
 export function resolveSigningKey(
   input: Record<string, unknown>,
   keyFileSource: string | undefined,
   stdin: string,
+  opts: KeyOpts = {},
 ): ResolvedKey {
-  const inline = input.key;
-  if (inline !== undefined && keyFileSource !== undefined) {
-    throw new SignerError("MALFORMED_ENVELOPE", "provide the key inline OR via --key, not both");
+  if (input.key !== undefined) {
+    throw new SignerError("INLINE_KEY_REJECTED", "inline key material is not accepted; use --key <path>");
   }
-  let key: ResolvedKey;
-  if (keyFileSource !== undefined) {
-    key = readKeyFile(keyFileSource, stdin);
-  } else if (inline !== undefined) {
-    key = resolveKeyBlock(inline);
-  } else {
-    throw new SignerError("MALFORMED_ENVELOPE", "signing requires a key (inline `key` or --key)");
+  if (keyFileSource === undefined) {
+    throw new SignerError("MALFORMED_INPUT", "signing requires --key <path>");
   }
+  const key = readKeyFile(keyFileSource, stdin, opts);
 
   // Validate the seed here so a malformed key surfaces as INVALID_PRIVATE_KEY on
   // every signing path — even when a public_jwk is supplied and the SDK would
@@ -103,13 +117,14 @@ export function voucherSignResult(
   input: unknown,
   keyFileSource: string | undefined,
   stdin: string,
+  opts: KeyOpts = {},
 ): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
   const voucher = record.voucher as AgentPaymentVoucher | undefined;
   if (voucher === null || typeof voucher !== "object") {
     throw new SignerError("MALFORMED_ENVELOPE", "voucher sign requires a `voucher` object");
   }
-  const key = resolveSigningKey(record, keyFileSource, stdin);
+  const key = resolveSigningKey(record, keyFileSource, stdin, opts);
   if (!key.privateKeyBase64Url) {
     throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
   }
@@ -142,6 +157,7 @@ export function voucherSignEnvelopeResult(
   input: unknown,
   keyFileSource: string | undefined,
   stdin: string,
+  opts: KeyOpts = {},
 ): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
 
@@ -199,7 +215,7 @@ export function voucherSignEnvelopeResult(
     );
   }
 
-  const key = resolveSigningKey(record, keyFileSource, stdin);
+  const key = resolveSigningKey(record, keyFileSource, stdin, opts);
   if (!key.privateKeyBase64Url) {
     throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
   }
@@ -228,27 +244,47 @@ export function voucherSignEnvelopeResult(
   };
 }
 
-/** `{ fields, key? } (+ optional --key) → { pop_signature }`. */
+/** `{ fields: { borrowerId, terminalId, jkt } } (+ --key <path>) → { …, pop_signature, nonce, iat }`. */
 export function popSignResult(
   input: unknown,
   keyFileSource: string | undefined,
-  stdin: string,
+  _stdin: string,
+  opts: { homeDir?: string; env?: NodeJS.ProcessEnv } = {},
 ): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
-  const fields = record.fields;
-  if (fields === null || typeof fields !== "object") {
-    throw new SignerError("MALFORMED_ENVELOPE", "pop sign requires a `fields` object");
+  const fields = record.fields as { borrowerId?: unknown; terminalId?: unknown; jkt?: unknown } | undefined;
+  if (fields === null || fields === undefined || typeof fields !== "object") {
+    throw new SignerError("MALFORMED_INPUT", "pop sign requires a `fields` object");
   }
-  const key = resolveSigningKey(record, keyFileSource, stdin);
-  if (!key.privateKeyBase64Url) {
-    throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
+  if (keyFileSource === undefined) {
+    throw new SignerError("MALFORMED_INPUT", "pop sign requires --key <path>");
   }
-  const { pop_signature } = signPoP(fields as PopChallengeFields, key.privateKeyBase64Url);
+  const { borrowerId, terminalId, jkt } = fields;
+  if (typeof borrowerId !== "string" || typeof terminalId !== "string" || typeof jkt !== "string") {
+    throw new SignerError("MALFORMED_INPUT", "pop sign fields require string borrowerId, terminalId, jkt");
+  }
+
+  // Bind the claimed identity to the stored key before signing anything.
+  const stored = loadKeyFile(validateKeyPath(keyFileSource, "read", opts)) as StoredWorkloadKey;
+  if (stored.borrower_id !== borrowerId) throw new SignerError("CROSS_BORROWER_KEY", "fields.borrowerId does not match the key file");
+  if (stored.terminal_id !== terminalId) throw new SignerError("TERMINAL_MISMATCH", "fields.terminalId does not match the key file");
+  if (stored.jkt !== jkt) throw new SignerError("AGENT_KEY_JKT_MISMATCH", "fields.jkt does not match the key file");
+
+  // Validate the stored seed up front so a tampered key file fails with a specific
+  // INVALID_PRIVATE_KEY (matching `voucher sign`) instead of a generic signing error.
+  decodeWorkloadSeed(stored.private_key_base64url);
+
+  // Nonce/iat are minted here, never accepted from the caller (replay defense).
+  const nonce = toBase64Url(randomBytes(32));
+  const iat = Math.floor(Date.now() / 1000);
+  const { pop_signature } = signPoP({ borrowerId, terminalId, jkt, nonce, iat }, stored.private_key_base64url);
   return {
     signer_protocol: SIGNER_PROTOCOL,
     implementation: IMPLEMENTATION,
     implementation_version: implementationVersion(),
     pop_signature,
+    nonce,
+    iat,
     algorithm: SUPPORTED_SIGNING.algorithm,
   };
 }

@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { loadVectors } from "@sohopay/signer-vectors";
 import { run } from "../src/cli/run.js";
+import { withKeyFile } from "./key-home-fixture.js";
 
 const doc = loadVectors();
 const testKey = doc.testKeys[0];
@@ -27,13 +28,16 @@ function prepareResponse(voucher: Record<string, unknown>) {
   };
 }
 
-function key() {
-  return { private_key_base64url: testKey.seedB64Url, public_jwk: testKey.publicJwk };
+const keyContent = { private_key_base64url: testKey.seedB64Url, public_jwk: testKey.publicJwk };
+
+/** Runs the CLI with the signing key supplied as a 0600 --key file under a temp key root. */
+function runWithKey(args: string[], stdinObj: unknown) {
+  return withKeyFile(keyContent, (keyPath) => run([...args, "--key", keyPath], JSON.stringify(stdinObj)));
 }
 
 test("voucher sign --envelope fills only the signature and returns the completed header", () => {
-  const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
-  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  const stdin = prepareResponse(vector.input.voucher);
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 0, r.stderr);
   const out = JSON.parse(r.stdout);
 
@@ -61,8 +65,8 @@ test("voucher sign --envelope fills only the signature and returns the completed
 test("an input envelope that already carries a signature is MALFORMED_ENVELOPE", () => {
   const prep = prepareResponse(vector.input.voucher);
   prep.envelope.paymentPayload.payload.signature = "already-here" as never;
-  const stdin = JSON.stringify({ ...prep, key: key() });
-  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  const stdin = prep;
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 1);
   assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
   assert.ok(!r.stderr.includes(testKey.seedB64Url), "stderr must not contain the private seed");
@@ -71,8 +75,8 @@ test("an input envelope that already carries a signature is MALFORMED_ENVELOPE",
 test("an input envelope missing paymentPayload.payload is MALFORMED_ENVELOPE (no crash)", () => {
   const prep = prepareResponse(vector.input.voucher) as Record<string, unknown>;
   prep.envelope = { x402Version: 2 }; // no paymentPayload
-  const stdin = JSON.stringify({ ...prep, key: key() });
-  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  const stdin = prep;
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 1);
   assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
 });
@@ -80,8 +84,8 @@ test("an input envelope missing paymentPayload.payload is MALFORMED_ENVELOPE (no
 test("a missing header_name is MALFORMED_ENVELOPE (never a guessed header)", () => {
   const prep = prepareResponse(vector.input.voucher) as Record<string, unknown>;
   delete prep.header_name;
-  const stdin = JSON.stringify({ ...prep, key: key() });
-  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  const stdin = prep;
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 1);
   assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
 });
@@ -98,8 +102,8 @@ test("the envelope's embedded voucher with a different paymentId is PAYMENT_ID_M
       },
     },
   };
-  const stdin = JSON.stringify({ ...prep, key: key() });
-  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  const stdin = prep;
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 1);
   assert.equal(JSON.parse(r.stderr).error.code, "PAYMENT_ID_MISMATCH");
   assert.ok(!r.stderr.includes(testKey.seedB64Url), "stderr must not contain the private seed");
@@ -112,8 +116,8 @@ test("--envelope on a non-voucher-sign command is a usage error (exit 2)", () =>
 });
 
 test("--write-header without --envelope is a usage error (exit 2)", () => {
-  const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
-  const r = run(["voucher", "sign", "--write-header", "/tmp/h.txt", "--input", "-"], stdin);
+  const stdin = prepareResponse(vector.input.voucher);
+  const r = runWithKey(["voucher", "sign", "--write-header", "/tmp/h.txt", "--input", "-"], stdin);
   assert.equal(r.exitCode, 2);
   assert.doesNotMatch(r.stderr, /"error"/);
 });
@@ -121,11 +125,8 @@ test("--write-header without --envelope is a usage error (exit 2)", () => {
 test("--write-header writes a curl-ready `<name>: <value>` header line", () => {
   const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
   const headerPath = join(dir, "header.txt");
-  const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
-  const r = run(
-    ["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", "json"],
-    stdin,
-  );
+  const stdin = prepareResponse(vector.input.voucher);
+  const r = runWithKey(["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   const fileBytes = readFileSync(headerPath, "utf8");
@@ -135,9 +136,8 @@ test("--write-header writes a curl-ready `<name>: <value>` header line", () => {
 });
 
 test("an unwritable --write-header path is MALFORMED_ENVELOPE with no stdout", () => {
-  const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
-  const r = run(
-    [
+  const stdin = prepareResponse(vector.input.voucher);
+  const r = runWithKey([
       "voucher",
       "sign",
       "--envelope",
@@ -147,9 +147,7 @@ test("an unwritable --write-header path is MALFORMED_ENVELOPE with no stdout", (
       "-",
       "--output",
       "json",
-    ],
-    stdin,
-  );
+    ], stdin);
   assert.equal(r.exitCode, 1);
   assert.equal(r.stdout, "");
   assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
@@ -158,8 +156,8 @@ test("an unwritable --write-header path is MALFORMED_ENVELOPE with no stdout", (
 test("a header_name with CRLF (injection attempt) is MALFORMED_ENVELOPE", () => {
   const prep = prepareResponse(vector.input.voucher) as Record<string, unknown>;
   prep.header_name = "PAYMENT-SIGNATURE\r\nX-Injected: evil";
-  const stdin = JSON.stringify({ ...prep, key: key() });
-  const r = run(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  const stdin = prep;
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 1);
   assert.equal(JSON.parse(r.stderr).error.code, "MALFORMED_ENVELOPE");
 });
@@ -167,11 +165,8 @@ test("a header_name with CRLF (injection attempt) is MALFORMED_ENVELOPE", () => 
 test("--write-header creates the file with mode 0600", () => {
   const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
   const headerPath = join(dir, "header.txt");
-  const stdin = JSON.stringify({ ...prepareResponse(vector.input.voucher), key: key() });
-  const r = run(
-    ["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", "json"],
-    stdin,
-  );
+  const stdin = prepareResponse(vector.input.voucher);
+  const r = runWithKey(["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 0, r.stderr);
   // Low 9 permission bits must be owner-only read/write (0o600).
   assert.equal(statSync(headerPath).mode & 0o777, 0o600);

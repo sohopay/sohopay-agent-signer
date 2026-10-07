@@ -1,12 +1,16 @@
 // test/bundle-behavior.test.ts
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, symlinkSync, readFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
 
+import { ed25519 } from "@noble/curves/ed25519";
 import { loadVectors } from "@sohopay/signer-vectors";
+
+import { fromBase64Url } from "../src/encoding.js";
+import { buildPopChallengeMessage } from "../src/pop.js";
 
 const BUNDLE = join(process.cwd(), "dist-bundle/sohopay-signer.mjs");
 
@@ -92,50 +96,88 @@ test("capabilities is semantically identical between source and bundle", () => {
 const doc = loadVectors();
 const testKey = doc.testKeys[0];
 
-function cleanRoomRun(args: string[], stdin: string) {
+function cleanRoomRun(args: string[], stdin: string, home?: string) {
   const dir = cleanRoom();
+  // When a home is given, point the child's HOME at it so the signer resolves its
+  // allowed key root there (env roots may only narrow, so --key must live under HOME).
+  const env = home ? { ...process.env, HOME: home, USERPROFILE: home } : process.env;
   try {
     return spawnSync("node", ["sohopay-signer.mjs", ...args], {
-      cwd: dir, encoding: "utf8", input: stdin,
+      cwd: dir, encoding: "utf8", input: stdin, env,
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
-test("clean-room: pop sign --input - reproduces the vector pop_signature", () => {
+/** Writes a 0600 secret.json under a fresh HOME's default key root; returns { home, keyPath }. */
+function keyUnderHome(stored: Record<string, unknown>): { home: string; keyPath: string } {
+  const home = mkdtempSync(join(tmpdir(), "signer-key-home-"));
+  const root = join(home, ".agents", "sohopay-agent-workload");
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  chmodSync(root, 0o700);
+  const keyPath = join(root, "secret.json");
+  writeFileSync(keyPath, JSON.stringify(stored), { mode: 0o600 });
+  chmodSync(keyPath, 0o600);
+  return { home, keyPath };
+}
+
+test("clean-room: pop sign --key <file> --input - mints nonce/iat and signs verifiably", () => {
   const vector = doc.vectors.pop[0] as {
-    input: { fields: Record<string, unknown> };
-    expected: { popSignature: string };
+    input: { fields: { borrowerId: string; terminalId: string; jkt: string } };
   };
-  const stdin = JSON.stringify({
-    fields: vector.input.fields,
-    key: { private_key_base64url: testKey.seedB64Url },
+  const { borrowerId, terminalId, jkt } = vector.input.fields;
+  // Reference-only key input (INV-3): the private key enters via --key, never inline.
+  const { home, keyPath } = keyUnderHome({
+    private_key_base64url: testKey.seedB64Url,
+    public_jwk: testKey.publicJwk,
+    jkt,
+    borrower_id: borrowerId,
+    terminal_id: terminalId,
   });
-  const r = cleanRoomRun(["pop", "sign", "--input", "-", "--output", "json"], stdin);
-  assert.equal(r.status, 0, r.stderr);
-  const out = JSON.parse(r.stdout);
-  assert.equal(out.algorithm, "Ed25519");
-  assert.equal(out.pop_signature, vector.expected.popSignature);
+  try {
+    // Only the three bound fields; the CLI mints nonce/iat itself (rejects client-supplied ones).
+    const stdin = JSON.stringify({ fields: { borrowerId, terminalId, jkt } });
+    const r = cleanRoomRun(["pop", "sign", "--key", keyPath, "--input", "-", "--output", "json"], stdin, home);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.algorithm, "Ed25519");
+    assert.ok(typeof out.pop_signature === "string" && out.pop_signature.length > 0);
+    assert.ok(typeof out.nonce === "string" && out.nonce.length >= 43);
+    assert.ok(Number.isSafeInteger(out.iat));
+    // The signature must verify under the test public key over the CLI's own minted challenge
+    // — the correctness proof that replaces the (now non-deterministic) fixed-vector match.
+    const message = buildPopChallengeMessage({ borrowerId, terminalId, jkt, nonce: out.nonce, iat: out.iat });
+    assert.ok(
+      ed25519.verify(fromBase64Url(out.pop_signature), message, fromBase64Url(testKey.publicJwk.x)),
+      "pop signature must verify under the test public key",
+    );
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("clean-room: voucher sign --envelope --input - reproduces the vector signature", () => {
+test("clean-room: voucher sign --envelope --key <file> --input - reproduces the vector signature", () => {
   const vector = doc.vectors.voucherSignature[0] as {
     input: { voucher: Record<string, unknown>; signing?: unknown };
     expected: { signature: string };
   };
   const voucher = vector.input.voucher;
-  const stdin = JSON.stringify({
-    voucher,
-    signing: vector.input.signing,
-    envelope: { x402Version: 2, paymentPayload: { payload: { voucher, signature: null } } },
-    header_name: "PAYMENT-SIGNATURE",
-    key: { private_key_base64url: testKey.seedB64Url, public_jwk: testKey.publicJwk },
+  // Reference-only key input (INV-3): the private key enters via --key, never inline.
+  const { home, keyPath } = keyUnderHome({
+    private_key_base64url: testKey.seedB64Url,
+    public_jwk: testKey.publicJwk,
   });
-  const r = cleanRoomRun(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
-  assert.equal(r.status, 0, r.stderr);
-  const out = JSON.parse(r.stdout);
-  assert.equal(out.payment_id, voucher.paymentId);
-  assert.equal(out.signature, vector.expected.signature);
-  assert.equal(out.header_name, "PAYMENT-SIGNATURE");
-  assert.ok(typeof out.header_value === "string" && out.header_value.length > 0);
+  try {
+    const stdin = JSON.stringify({
+      voucher,
+      signing: vector.input.signing,
+      envelope: { x402Version: 2, paymentPayload: { payload: { voucher, signature: null } } },
+      header_name: "PAYMENT-SIGNATURE",
+    });
+    const r = cleanRoomRun(["voucher", "sign", "--envelope", "--key", keyPath, "--input", "-", "--output", "json"], stdin, home);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.payment_id, voucher.paymentId);
+    assert.equal(out.signature, vector.expected.signature);
+    assert.equal(out.header_name, "PAYMENT-SIGNATURE");
+    assert.ok(typeof out.header_value === "string" && out.header_value.length > 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
