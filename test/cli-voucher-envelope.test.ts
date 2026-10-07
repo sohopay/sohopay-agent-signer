@@ -144,7 +144,7 @@ function leakedSubstring(secret: string, haystack: string, min = 16): string | u
   return undefined;
 }
 
-for (const output of ["json", "text"] as const) {
+for (const output of ["json", "human"] as const) {
   test(`INV-1: --write-header keeps header_value out of stdout and stderr (--output ${output})`, () => {
     const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
     const headerPath = join(dir, "header.txt");
