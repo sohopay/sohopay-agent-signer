@@ -126,13 +126,80 @@ test("--write-header writes a curl-ready `<name>: <value>` header line", () => {
   const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
   const headerPath = join(dir, "header.txt");
   const stdin = prepareResponse(vector.input.voucher);
+  const noFlag = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
   const r = runWithKey(["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", "json"], stdin);
   assert.equal(r.exitCode, 0, r.stderr);
-  const out = JSON.parse(r.stdout);
-  const fileBytes = readFileSync(headerPath, "utf8");
   // Exactly one header line, terminated by \n, so `curl -H @<file>` replays it
   // without the value ever entering a shell argument or the model's context.
-  assert.equal(fileBytes, `${out.header_name}: ${out.header_value}\n`);
+  const expected = JSON.parse(noFlag.stdout);
+  assert.equal(readFileSync(headerPath, "utf8"), `${expected.header_name}: ${expected.header_value}\n`);
+});
+
+/** Every substring of `secret` with length >= `min`, checked against `haystack`. */
+function leakedSubstring(secret: string, haystack: string, min = 16): string | undefined {
+  for (let i = 0; i + min <= secret.length; i++) {
+    const chunk = secret.slice(i, i + min);
+    if (haystack.includes(chunk)) return chunk;
+  }
+  return undefined;
+}
+
+for (const output of ["json", "text"] as const) {
+  test(`INV-1: --write-header keeps header_value out of stdout and stderr (--output ${output})`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "sohopay-cli-hdr-"));
+    const headerPath = join(dir, "header.txt");
+    const stdin = prepareResponse(vector.input.voucher);
+    const baseline = JSON.parse(
+      runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin).stdout,
+    );
+    const r = runWithKey(
+      ["voucher", "sign", "--envelope", "--write-header", headerPath, "--input", "-", "--output", output],
+      stdin,
+    );
+    assert.equal(r.exitCode, 0, r.stderr);
+    const value: string = baseline.header_value;
+    assert.ok(value.length >= 16);
+    // The credential reaches the file only.
+    assert.ok(readFileSync(headerPath, "utf8").includes(value));
+    for (const stream of [r.stdout, r.stderr]) {
+      assert.ok(!stream.includes(value), "full header_value leaked");
+      assert.equal(leakedSubstring(value, stream), undefined, "header_value substring leaked");
+      assert.ok(!stream.includes("header_value"), "header_value key present");
+      // The completed envelope and signature are the same credential in decomposed form.
+      assert.ok(!stream.includes(baseline.signature), "signature leaked");
+    }
+    // Non-secret metadata and the file path stay reported.
+    assert.ok(r.stdout.includes(headerPath));
+    assert.ok(r.stdout.includes(baseline.payment_id));
+  });
+}
+
+test("INV-1: an unwritable --write-header path leaks no header_value on any stream", () => {
+  const stdin = prepareResponse(vector.input.voucher);
+  const baseline = JSON.parse(
+    runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin).stdout,
+  );
+  const r = runWithKey(
+    ["voucher", "sign", "--envelope", "--write-header", "/no-such-dir-sohopay/h.txt", "--input", "-", "--output", "json"],
+    stdin,
+  );
+  assert.equal(r.exitCode, 1);
+  for (const stream of [r.stdout, r.stderr]) {
+    assert.equal(leakedSubstring(baseline.header_value, stream), undefined);
+  }
+});
+
+test("without --write-header the envelope result is unchanged (header_value still on stdout)", () => {
+  const stdin = prepareResponse(vector.input.voucher);
+  const r = runWithKey(["voucher", "sign", "--envelope", "--input", "-", "--output", "json"], stdin);
+  assert.equal(r.exitCode, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(
+    Object.keys(out).sort(),
+    ["agent_key_jkt", "algorithm", "envelope", "header_name", "header_value", "implementation", "implementation_version", "payment_id", "signature", "signer_protocol"].sort(),
+  );
+  assert.equal(typeof out.header_value, "string");
+  assert.equal(out.header_file, undefined);
 });
 
 test("an unwritable --write-header path is MALFORMED_ENVELOPE with no stdout", () => {
