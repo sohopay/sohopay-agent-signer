@@ -1,0 +1,79 @@
+# Publishes the npm package @sohopay/agent-signer to GitHub Packages.
+#
+# Complementary to release-bundle.yml (which attaches the portable bundled JS to a
+# GitHub Release on js-bundle-v* tags). This channel is the installable npm package
+# that `npx @sohopay/agent-signer@<version>` resolves — required by downstream merge
+# gates (e.g. sohopay/skills' signer-contract-check). Triggered by a v* tag (no overlap
+# with js-bundle-v*) or manually with the tag to publish.
+#
+# Visibility note: GitHub links the package to this repo on first publish via
+# GITHUB_TOKEN. Grant the package Read access to any consumer repo (e.g. sohopay/skills)
+# under Package settings → Manage Actions access, as done for @sohopay/signer-vectors.
+name: Publish package
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "v<version> tag to publish"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@sohopay"
+      - name: Install dependencies
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert built version == tag version
+        env:
+          REF: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          ref="$REF"
+          tag_version="${ref#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          echo "tag=$tag_version pkg=$pkg_version"
+          test "$tag_version" = "$pkg_version"
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify capabilities contract before publish
+        run: |
+          set -euo pipefail
+          caps="$(node dist/cli/index.js capabilities)"
+          echo "$caps"
+          node -e '
+            const c = JSON.parse(process.argv[1]);
+            if (c.signer_protocol !== "sohopay-signer/1") { console.error("bad signer_protocol:", c.signer_protocol); process.exit(1); }
+            if (c.command_contracts?.["key generate"] !== "workload-keygen/1") { console.error("bad key generate contract:", c.command_contracts?.["key generate"]); process.exit(1); }
+            console.log("capabilities OK");
+          ' "$caps"
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
