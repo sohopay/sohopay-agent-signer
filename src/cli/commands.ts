@@ -22,6 +22,9 @@ export function implementationVersion(): string {
   if (typeof __SIGNER_IMPL_VERSION__ !== "undefined" && __SIGNER_IMPL_VERSION__) {
     return __SIGNER_IMPL_VERSION__;
   }
+  // Below is the tsc/tsx path only. In the esbuild bundle the `define` above makes the
+  // first branch always true, so this package.json read is dead there — its relative
+  // `../../package.json` URL would not resolve from the single-file bundle if ever reached.
   const pkg = JSON.parse(
     readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { version?: string };

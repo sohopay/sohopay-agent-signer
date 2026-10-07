@@ -69,6 +69,10 @@ jobs:
       - name: Clean-room with NO node_modules and NO network
         run: |
           set -euo pipefail
+          # Ubuntu 24.04 runners restrict unprivileged user namespaces (AppArmor), so a bare
+          # `unshare -rn` fails with "write /proc/self/uid_map: Operation not permitted". Lift the
+          # knob so the uid remap works; `|| true` keeps this a no-op on kernels without it.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
           work="$(mktemp -d)"
           cp dist-bundle/sohopay-signer.mjs "$work/"
           ( cd "$work" && unshare -rn node sohopay-signer.mjs capabilities --output json )

@@ -126,12 +126,18 @@ The bundle supports three ways to run:
 
 ### Releasing the bundle
 
-The repo is **public** (required for token-free asset download and `gh attestation verify` support). To release:
+**One-time repo setup (must be in place before the first release — these are the trust controls the install flow above relies on):**
+
+- Make the repo **public** — required for token-free asset download and `gh attestation verify` support.
+- Enable **immutable releases** and **`js-bundle-v*` tag protection** so published assets and tags cannot be replaced after the fact.
+
+To release, once the above are enabled:
 
 1. Tag the commit: `git tag "js-bundle-v<version>"` where `<version>` matches `package.json`
 2. Push the tag: `git push origin "js-bundle-v<version>"` — GitHub Actions builds and publishes the release automatically
-3. **Immutable releases** and **`js-bundle-v*` tag protection** are enabled, so published assets cannot be replaced. Once a release is live, it is permanent.
-4. Add the new version row to the "Expected hashes" table above on the `main` branch to record the trust anchor for future verifications.
+3. Add the new version row to the "Expected hashes" table above on the `main` branch to record the trust anchor for future verifications.
+
+With immutable releases enabled, a published release is permanent — its assets cannot be swapped.
 
 ## CLI (sohopay-signer)
 
