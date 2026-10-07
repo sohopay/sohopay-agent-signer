@@ -41,3 +41,70 @@ jobs:
       # storage / terminal / idempotency suites gate every push.
       - name: Test
         run: npm test
+
+  bundle:
+    name: bundle (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22] # floor + current LTS
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@sohopay"
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build bundle
+        run: npm run bundle
+      - name: Bundle build + shim + behavior tests
+        run: node --import tsx --test test/bundle-build.test.ts test/bundle-vectors-shim.test.ts test/bundle-behavior.test.ts
+      - name: Full CLI suite against the bundle (parity)
+        run: SOHOPAY_SIGNER_BIN="$PWD/dist-bundle/sohopay-signer.mjs" node --import tsx --test test/cli-capabilities.test.ts test/cli-pop.test.ts test/cli-readonly.test.ts test/cli-verify-vectors.test.ts test/cli-voucher-envelope.test.ts test/cli-voucher.test.ts
+      - name: Clean-room with NO node_modules and NO network
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cp dist-bundle/sohopay-signer.mjs "$work/"
+          ( cd "$work" && unshare -rn node sohopay-signer.mjs capabilities --output json )
+          ( cd "$work" && unshare -rn node sohopay-signer.mjs verify-vectors --output json )
+      - name: Reproducibility (two clean dirs, byte-identical)
+        run: |
+          set -euo pipefail
+          a="$(mktemp -d)"; b="$(mktemp -d)"
+          SOHOPAY_BUNDLE_OUTDIR="$a" node scripts/bundle.mjs
+          SOHOPAY_BUNDLE_OUTDIR="$b" node scripts/bundle.mjs
+          diff "$a/sohopay-signer.mjs" "$b/sohopay-signer.mjs"
+          ( cd "$a" && sha256sum -c sohopay-signer.mjs.sha256 )
+
+  node-floor:
+    name: node-16 floor guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@sohopay"
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npm run bundle
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16
+      - name: bundle refuses Node 16 with a coded error
+        run: |
+          set +e
+          out="$(node dist-bundle/sohopay-signer.mjs capabilities 2>&1)"; code=$?
+          set -e
+          echo "$out"
+          test "$code" -ne 0
+          echo "$out" | grep -q "NODE_VERSION_UNSUPPORTED"
