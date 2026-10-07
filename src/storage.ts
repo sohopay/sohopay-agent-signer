@@ -117,13 +117,10 @@ export function loadWorkloadKey(args: {
   return parsed;
 }
 
-/** Atomically persists a workload key at 0600 (temp file → fsync → rename). */
-export function saveWorkloadKey(key: StoredWorkloadKey, options: WorkloadKeyStoreOptions = {}): void {
-  assertSafeBorrowerId(key.borrower_id);
-  const path = secretPath(key.borrower_id, options.dataDir);
+/** Atomically writes a StoredWorkloadKey at an explicit path (0600, temp→fsync→rename). */
+export function writeSecretFileAtPath(path: string, key: StoredWorkloadKey): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-
   const tmp = join(dir, `.secret.${process.pid}.${Date.now()}.tmp`);
   const fd = openSync(tmp, "w", 0o600);
   try {
@@ -134,6 +131,12 @@ export function saveWorkloadKey(key: StoredWorkloadKey, options: WorkloadKeyStor
   }
   chmodSync(tmp, 0o600);
   renameSync(tmp, path);
+}
+
+/** Atomically persists a workload key at 0600 (temp file → fsync → rename). */
+export function saveWorkloadKey(key: StoredWorkloadKey, options: WorkloadKeyStoreOptions = {}): void {
+  assertSafeBorrowerId(key.borrower_id);
+  writeSecretFileAtPath(secretPath(key.borrower_id, options.dataDir), key);
 }
 
 /**
