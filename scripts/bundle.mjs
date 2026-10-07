@@ -26,7 +26,8 @@ await build({
   target: "node18",
   sourcemap: false,
   legalComments: "external", // writes <outfile>.LEGAL.txt
-  banner: { js: "#!/usr/bin/env node" },
+  // No banner: esbuild preserves the entry's own shebang (src/cli/index.ts line 1);
+  // adding one here produced a duplicate "#!" line, an ESM SyntaxError.
   define: { __SIGNER_IMPL_VERSION__: JSON.stringify(pkg.version) },
   alias: { "@sohopay/signer-vectors": join(here, "bundle-vectors-shim.mjs") },
 });

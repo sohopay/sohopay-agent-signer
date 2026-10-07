@@ -18,6 +18,13 @@ test("bundle emits an executable .mjs with a node shebang", () => {
   assert.ok((statSync(OUT).mode & 0o111) !== 0, "not executable");
 });
 
+test("bundle has exactly one shebang line and actually runs (regression: duplicate #!)", () => {
+  const shebangs = readFileSync(OUT, "utf8").split("\n").filter((l) => l.startsWith("#!"));
+  assert.equal(shebangs.length, 1, `expected 1 shebang line, got ${shebangs.length}`);
+  const r = spawnSync("node", [OUT, "capabilities"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+});
+
 test("checksum file uses the conventional sha256sum format", () => {
   const line = readFileSync(`${OUT}.sha256`, "utf8").trim();
   assert.match(line, /^[0-9a-f]{64}  sohopay-signer\.mjs$/);
