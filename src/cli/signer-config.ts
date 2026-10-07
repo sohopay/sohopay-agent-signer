@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, platform, userInfo } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { SignerError } from "../errors.js";
 
@@ -73,7 +73,7 @@ export function resolveKeyRoots(opts: { homeDir?: string; env?: NodeJS.ProcessEn
   const envRoots = envRaw.split(":").filter((s) => s.length > 0).map((r) => normalizeRootEntry(r, "SOHOPAY_SIGNER_KEY_ROOTS"));
   const narrowed: string[] = [];
   for (const er of envRoots) {
-    const ok = [...configured].some((cr) => er === cr || er.startsWith(cr + "/"));
+    const ok = [...configured].some((cr) => er === cr || er.startsWith(cr + sep));
     if (!ok) invalid(`SOHOPAY_SIGNER_KEY_ROOTS entry ${er} is not within a configured root`);
     narrowed.push(er);
   }

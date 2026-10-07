@@ -258,6 +258,10 @@ export function popSignResult(
   if (stored.terminal_id !== terminalId) throw new SignerError("TERMINAL_MISMATCH", "fields.terminalId does not match the key file");
   if (stored.jkt !== jkt) throw new SignerError("AGENT_KEY_JKT_MISMATCH", "fields.jkt does not match the key file");
 
+  // Validate the stored seed up front so a tampered key file fails with a specific
+  // INVALID_PRIVATE_KEY (matching `voucher sign`) instead of a generic signing error.
+  decodeWorkloadSeed(stored.private_key_base64url);
+
   // Nonce/iat are minted here, never accepted from the caller (replay defense).
   const nonce = toBase64Url(randomBytes(32));
   const iat = Math.floor(Date.now() / 1000);

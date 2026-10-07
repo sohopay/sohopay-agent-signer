@@ -27,6 +27,24 @@ test("pop sign mints nonce+iat and returns them; signs with the file key", () =>
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("pop sign rejects a tampered (wrong-length) stored seed with INVALID_PRIVATE_KEY and no leak", () => {
+  const home = mkdtempSync(join(tmpdir(), "pop-tamper-"));
+  const root = join(home, ".agents", "sohopay-agent-workload");
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const out = join(root, "secret.json");
+  const tampered = "TAMPERED_SHORT_KEY_xyz"; // valid JSON, but not a 32-byte seed
+  writeFileSync(out, JSON.stringify({ private_key_base64url: tampered, public_jwk: { kty: "OKP", crv: "Ed25519", x: "AAAA" }, jkt: "j", terminal_id: "t", borrower_id: "b" }), { mode: 0o600 });
+  chmodSync(out, 0o600);
+  const opts = { homeDir: home, env: {} as NodeJS.ProcessEnv };
+  try {
+    assert.throws(
+      () => popSignResult({ fields: { borrowerId: "b", terminalId: "t", jkt: "j" } }, out, "", opts),
+      (e: { code?: string; message?: string }) =>
+        e.code === "INVALID_PRIVATE_KEY" && !String(e.message).includes(tampered),
+    );
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("pop sign refuses a terminal mismatch and a borrower mismatch", () => {
   const { home, out, jkt, opts } = keyFile("b1", "t1");
   try {

@@ -25,6 +25,19 @@ test("absent → generates, writes 0600, returns created:true and only public ma
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("absent root dir → creates the root 0700, writes 0600, created:true (fresh machine)", () => {
+  const home = mkdtempSync(join(tmpdir(), "kg-fresh-"));
+  const root = join(home, ".agents", "sohopay-agent-workload"); // intentionally NOT pre-created
+  const out = join(root, "secret.json");
+  const opts = { homeDir: home, env: {} as NodeJS.ProcessEnv };
+  try {
+    const r = keyGenerateResult({ borrower_id: "b1", terminal_id: "t1" }, out, opts) as Record<string, unknown>;
+    assert.equal(r.created, true);
+    assert.equal(statSync(out).mode & 0o777, 0o600);
+    assert.equal(statSync(root).mode & 0o077, 0); // the created root is owner-only
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("same borrower + same terminal → created:false, same jkt, byte-identical file", () => {
   const { home, out, opts } = env();
   try {

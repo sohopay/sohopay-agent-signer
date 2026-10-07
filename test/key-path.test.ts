@@ -1,5 +1,5 @@
 // test/key-path.test.ts
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -19,6 +19,18 @@ test("ensure mode accepts an absent secret.json under the root", () => {
   try {
     const p = validateKeyPath(join(root, "secret.json"), "ensure", { homeDir: home, env: {} });
     assert.ok(p.endsWith("/secret.json"));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("ensure mode creates an absent allowed root at 0700 (fresh machine)", () => {
+  const home = mkdtempSync(join(tmpdir(), "kp-fresh-"));
+  try {
+    const root = join(home, ".agents", "sohopay-agent-workload"); // intentionally NOT created
+    const p = validateKeyPath(join(root, "secret.json"), "ensure", { homeDir: home, env: {} });
+    assert.ok(p.endsWith("/sohopay-agent-workload/secret.json"));
+    const st = statSync(root);
+    assert.ok(st.isDirectory());
+    assert.equal(st.mode & 0o077, 0); // owner-only, never group/world accessible
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
