@@ -3,6 +3,8 @@ import { chmodSync, writeFileSync } from "node:fs";
 import { parseArgs, UsageError } from "./args.js";
 import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, verifyVectorsResult, voucherSignEnvelopeResult, voucherSignResult } from "./commands.js";
 import { readInput } from "./io.js";
+import { assertInputSchema, assertOutputSchema } from "./io-schema.js";
+import { keyGenerateResult } from "./key-generate.js";
 import { SignerError } from "../errors.js";
 
 export interface CliResult {
@@ -85,9 +87,20 @@ export function run(argv: string[], stdin: string): CliResult {
           result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
         }
         break;
-      case "pop sign":
-        result = popSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
+      case "key generate": {
+        const input = readInput(parsed.input, stdin);
+        assertInputSchema("key generate", input);
+        result = keyGenerateResult(input, parsed.out);
+        assertOutputSchema("key generate", result);
         break;
+      }
+      case "pop sign": {
+        const input = readInput(parsed.input, stdin);
+        assertInputSchema("pop sign", input);
+        result = popSignResult(input, parsed.key, stdin);
+        assertOutputSchema("pop sign", result);
+        break;
+      }
       case "verify-vectors": {
         const { result: summary, ok } = verifyVectorsResult();
         return { stdout: format(summary, parsed.output), stderr: "", exitCode: ok ? 0 : 1 };

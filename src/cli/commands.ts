@@ -54,10 +54,15 @@ export function paymentIdResult(input: unknown): Record<string, unknown> {
   return { payment_id: computePaymentId(core as AgentPaymentVoucherCore) };
 }
 
+type KeyOpts = { homeDir?: string; env?: NodeJS.ProcessEnv };
+
 /** `{ public_jwk } | { key: { public_jwk | private_key_base64url } } → { agent_key_jkt }`. */
 export function keyJktResult(input: unknown): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
   const block = record.public_jwk !== undefined ? { public_jwk: record.public_jwk } : record.key;
+  if (block && typeof block === "object" && (block as Record<string, unknown>).private_key_base64url !== undefined) {
+    throw new SignerError("INLINE_KEY_REJECTED", "key jkt does not accept inline private key material; pass public_jwk");
+  }
   const key = resolveKeyBlock(block);
   if (key.publicJwk) {
     return { agent_key_jkt: computeJkt(key.publicJwk) };
@@ -68,24 +73,23 @@ export function keyJktResult(input: unknown): Record<string, unknown> {
   throw new SignerError("MALFORMED_ENVELOPE", "key jkt requires public_jwk or a key with private/public material");
 }
 
-/** Resolves the signing key from exactly one source: inline `input.key` or --key. */
+/**
+ * Resolves the signing key from a validated `--key <path>` file only. Inline key
+ * material is rejected first (INV-3) so a secret never travels through input JSON.
+ */
 export function resolveSigningKey(
   input: Record<string, unknown>,
   keyFileSource: string | undefined,
   stdin: string,
+  opts: KeyOpts = {},
 ): ResolvedKey {
-  const inline = input.key;
-  if (inline !== undefined && keyFileSource !== undefined) {
-    throw new SignerError("MALFORMED_ENVELOPE", "provide the key inline OR via --key, not both");
+  if (input.key !== undefined) {
+    throw new SignerError("INLINE_KEY_REJECTED", "inline key material is not accepted; use --key <path>");
   }
-  let key: ResolvedKey;
-  if (keyFileSource !== undefined) {
-    key = readKeyFile(keyFileSource, stdin);
-  } else if (inline !== undefined) {
-    key = resolveKeyBlock(inline);
-  } else {
-    throw new SignerError("MALFORMED_ENVELOPE", "signing requires a key (inline `key` or --key)");
+  if (keyFileSource === undefined) {
+    throw new SignerError("MALFORMED_INPUT", "signing requires --key <path>");
   }
+  const key = readKeyFile(keyFileSource, stdin, opts);
 
   // Validate the seed here so a malformed key surfaces as INVALID_PRIVATE_KEY on
   // every signing path — even when a public_jwk is supplied and the SDK would
@@ -101,13 +105,14 @@ export function voucherSignResult(
   input: unknown,
   keyFileSource: string | undefined,
   stdin: string,
+  opts: KeyOpts = {},
 ): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
   const voucher = record.voucher as AgentPaymentVoucher | undefined;
   if (voucher === null || typeof voucher !== "object") {
     throw new SignerError("MALFORMED_ENVELOPE", "voucher sign requires a `voucher` object");
   }
-  const key = resolveSigningKey(record, keyFileSource, stdin);
+  const key = resolveSigningKey(record, keyFileSource, stdin, opts);
   if (!key.privateKeyBase64Url) {
     throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
   }
@@ -140,6 +145,7 @@ export function voucherSignEnvelopeResult(
   input: unknown,
   keyFileSource: string | undefined,
   stdin: string,
+  opts: KeyOpts = {},
 ): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
 
@@ -197,7 +203,7 @@ export function voucherSignEnvelopeResult(
     );
   }
 
-  const key = resolveSigningKey(record, keyFileSource, stdin);
+  const key = resolveSigningKey(record, keyFileSource, stdin, opts);
   if (!key.privateKeyBase64Url) {
     throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
   }
