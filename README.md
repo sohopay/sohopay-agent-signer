@@ -76,6 +76,63 @@ npm test          # parity suite (node --test)
 npm run build     # emit dist/
 ```
 
+## Install-free bundle (no npm registry required)
+
+A single self-contained `sohopay-signer.mjs` runs on any host with Node >= 18 — no
+`node_modules`, no network. Download it from the matching `js-bundle-v<version>` GitHub
+Release, **verify**, then point `$SOHOPAY_SIGNER` at it.
+
+### Download and verify
+
+1. Download the exact version you want (never `latest`):
+
+       V=0.2.0   # the js-bundle-v<version> you intend to run
+       gh release download "js-bundle-v$V" --repo sohopay/sohopay-agent-signer \
+         --pattern 'sohopay-signer.mjs' --pattern 'sohopay-signer.mjs.sha256'
+
+2. Verify. **Online (preferred)** — ties the file to the build workflow + commit:
+
+       gh attestation verify sohopay-signer.mjs --repo sohopay/sohopay-agent-signer
+
+   **Offline / air-gapped** — compare against the expected hash for that exact version
+   published in the table below (updated per release). Note: the downloaded `.sha256` is
+   a convenience against file corruption in transit, **not the trust anchor**; a
+   compromised release could swap both files. Trust only the out-of-release table:
+
+       sha256sum sohopay-signer.mjs   # compare to the table below
+
+3. Install and verify:
+
+       chmod +x sohopay-signer.mjs
+       export SOHOPAY_SIGNER="$PWD/sohopay-signer.mjs"
+       sohopay-signer capabilities    # expect signer_protocol: sohopay-signer/1
+       sohopay-signer verify-vectors  # expect exit 0
+
+### Expected hashes (trust anchor, out-of-release)
+
+| Version | sha256 of `sohopay-signer.mjs` |
+|---------|--------------------------------|
+| _(add a row per release)_ | _(the hash from the release build)_ |
+
+### Supported invocation forms
+
+The bundle supports three ways to run:
+
+- **`node sohopay-signer.mjs <command> [args]`** — explicit Node invocation; always works
+- **`./sohopay-signer.mjs <command> [args]`** — direct execution after `chmod +x`; works with Node >= 18.13 and modern shebangs
+- **Symlink on PATH** — `ln -s /path/to/sohopay-signer.mjs ~/bin/sohopay-signer` → `sohopay-signer <command>` (Node resolves the `.mjs` extension)
+
+**Not supported:** copying to an extensionless name (e.g. `cp sohopay-signer.mjs sohopay-signer`). On older Node versions this fails (Node parses an extensionless file as CommonJS and the ESM bundle errors); on Node >= 22.7 it may run via module auto-detection, but the behavior is version-dependent. Use the `.mjs` name or a symlink to it instead.
+
+### Releasing the bundle
+
+The repo is **public** (required for token-free asset download and `gh attestation verify` support). To release:
+
+1. Tag the commit: `git tag "js-bundle-v<version>"` where `<version>` matches `package.json`
+2. Push the tag: `git push origin "js-bundle-v<version>"` — GitHub Actions builds and publishes the release automatically
+3. **Immutable releases** and **`js-bundle-v*` tag protection** are enabled, so published assets cannot be replaced. Once a release is live, it is permanent.
+4. Add the new version row to the "Expected hashes" table above on the `main` branch to record the trust anchor for future verifications.
+
 ## CLI (sohopay-signer)
 
 The package ships a `sohopay-signer` bin for shell-capable agent hosts. It is a
