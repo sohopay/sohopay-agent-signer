@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, platform, userInfo } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import { SignerError } from "../errors.js";
 
@@ -27,6 +27,15 @@ function realOrNull(p: string): string | null {
   try { return realpathSync(p); } catch { return null; }
 }
 
+/** Reject relative or `..`-bearing entries so a lexical prefix can never escape a root (INV-4). */
+function normalizeRootEntry(entry: string, source: string): string {
+  if (!isAbsolute(entry) || entry.split(/[\\/]/).includes("..")) {
+    invalid(`${source} entry ${entry} must be an absolute path without ".." segments`);
+  }
+  const abs = resolve(entry);
+  return realOrNull(abs) ?? abs;
+}
+
 /** Resolve the allowed key roots: compiled default + config file, narrowed by env. */
 export function resolveKeyRoots(opts: { homeDir?: string; env?: NodeJS.ProcessEnv } = {}): string[] {
   const home = opts.homeDir ?? homedir();
@@ -45,12 +54,15 @@ export function resolveKeyRoots(opts: { homeDir?: string; env?: NodeJS.ProcessEn
     } catch {
       invalid(`${cfgPath} is not valid JSON`);
     }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      invalid(`${cfgPath} must contain a JSON object`);
+    }
     const roots = parsed.keyRoots;
     if (roots !== undefined) {
       if (!Array.isArray(roots) || roots.some((r) => typeof r !== "string")) {
         invalid(`${cfgPath} keyRoots must be an array of strings`);
       }
-      for (const r of roots as string[]) configured.add(realOrNull(r) ?? r);
+      for (const r of roots as string[]) configured.add(normalizeRootEntry(r, cfgPath));
     }
   }
 
@@ -58,7 +70,7 @@ export function resolveKeyRoots(opts: { homeDir?: string; env?: NodeJS.ProcessEn
   if (envRaw === undefined || envRaw.length === 0) {
     return [...configured];
   }
-  const envRoots = envRaw.split(":").filter((s) => s.length > 0).map((r) => realOrNull(r) ?? r);
+  const envRoots = envRaw.split(":").filter((s) => s.length > 0).map((r) => normalizeRootEntry(r, "SOHOPAY_SIGNER_KEY_ROOTS"));
   const narrowed: string[] = [];
   for (const er of envRoots) {
     const ok = [...configured].some((cr) => er === cr || er.startsWith(cr + "/"));
