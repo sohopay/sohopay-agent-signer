@@ -17,6 +17,10 @@ model only ever sees public material and relays opaque results.
 ## Scope
 
 **In scope.**
+- **Track 0 — backend verification (`sohopay-backend`), run now in parallel:** confirm the
+  four nonce-replay defenses are evidenced by named tests (see "Nonce"). Its outcome gates
+  **Track 2** merge, not Track 1 start. If a defense is missing, it is a minimal backend PR
+  with its own plan.
 - **Track 1 — SP5 Amendment B (signer repo, `sohopay-agent-signer`):** a `key generate`
   command (generation **and** persistence), signer-generated PoP nonce/`iat`, a shared
   key-path validator, reference-only key input (removing the inline raw-key form), and the
@@ -40,17 +44,26 @@ model only ever sees public material and relays opaque results.
 
 ## Delivery shape & merge-order gate
 
-Two tracks, signer first — the same gate SP5-initial used against Amendment A:
+Three tracks. **Track 0** (backend verification) and **Track 1** (signer) run in parallel;
+**Track 2** (skills) merges only after both resolve:
 
-1. **Amendment B** lands in the signer repo and is **published to the registry at a pinned
-   version** (`@sohopay/agent-signer@<x.y.z>`).
-2. **Only then** the skills routing merges. The skills repo CI resolves the **pinned**
+1. **Track 1 — Amendment B** lands in the signer repo and is **published to the registry at
+   a pinned version** (`@sohopay/agent-signer@<x.y.z>`).
+2. **Track 0** resolves: every nonce-replay defense is evidenced by a named test (or its
+   minimal backend fix is merged).
+3. **Only then Track 2** (skills routing) merges. The skills repo CI resolves the **pinned**
    signer and asserts `command_contracts["key generate"] == "workload-keygen/1"` **before**
-   the onboard routing tests run; a red check blocks merge.
+   the onboard routing tests run; a red check blocks merge. The Track 2 merge gate is:
+   **Track 1 published at the pin AND Track 0 resolved.**
 
 The protocol id stays **`sohopay-signer/1`** — no signing wire bytes change. `key generate`
 is additive; detection is by a per-command **contract id**, not a version compare (version
 stays diagnostic only).
+
+**Spec is referenced by commit SHA, not branch.** This spec lives on a signer-repo branch
+but governs both repos; the Track 2 (skills) plan links it by the commit SHA it was approved
+at (or the merged SHA), so later edits on the signer branch cannot silently change what
+Track 2 implements.
 
 ## Hard invariants
 
@@ -73,7 +86,7 @@ stays diagnostic only).
 
 CI invariants introduced (detailed in their tracks): INV-errleak, INV-outschema,
 INV-noseed, INV-rootenv (Track 1); INV-path-single-source, INV-pin-sync, INV-no-secret-access,
-INV-onboard-no-crypto, INV-onboard-routes (Track 2).
+INV-negative, INV-onboard-no-crypto, INV-onboard-routes, INV-no-placeholder (Track 2).
 
 ---
 
@@ -256,8 +269,15 @@ is **unchanged** (a body edit needs no eval change; a description edit would).
 - **INV-no-secret-access** — across **all** skills, `secret.json` appears only as a path
   argument to `--out`/`--key` or in the single-source definition; never adjacent to read,
   cat, open, copy, move, or delete verbs.
+- **INV-negative** — the excluded skills `sohopay-authorize-agent` and `sohopay-repay`
+  contain **no** signer routing (`key generate` / `pop sign` / `voucher sign` / signer
+  resolution); their borrower-off-device consent-signing boundary stays intact, so a future
+  edit can't silently pull borrower authorization credentials into the agent-signer path.
 - **INV-pin-sync** — the npx pin in `signer.md`, the install command in the fail-closed
   error, and the version the merge-gate CI resolves are one constant; CI fails on drift.
+- **INV-no-placeholder** — CI fails if any unresolved placeholder literal (`<x.y.z>` or
+  similar) remains in `signer.md`, the fail-closed error payloads, or the merge-gate config.
+  Nothing relies on a human remembering to fill the pin.
 - **Merge-gate CI** — resolve the pinned signer and assert
   `command_contracts["key generate"] == "workload-keygen/1"` before onboard routing tests
   run (red blocks merge).
@@ -289,30 +309,43 @@ challenge) is deferred to a backend follow-up, because there is no challenge-iss
 backend protocol design is out of SP5-complete's scope.
 
 The deferral is **safe only if** all four replay-defenses hold today, each evidenced by a
-named backend test. Verified in `sohopay-backend`:
+**named** backend test. **Track 0** verifies this (run now, in parallel with Track 1); its
+outcome **gates Track 2 merge**. A defense that is "known to exist" but has no named test is
+**open** and stays in Track 0 until named or fixed. Current status (all in
+`sohopay-backend`):
 
-1. **Nonce single-use store** — `src/modules/mcp-gateway/__tests__/agents-workload-key.e2e.spec.ts`
-   "nonce replay maps POP_CHALLENGE_INVALID to 400". *(The plan confirms the store TTL ≥ the
-   `iat` skew window.)*
-2. **`iat` skew bound enforced** — **to confirm**: no dedicated skew test appears in the
-   `agents-workload-key` e2e matrix. If genuinely absent, a minimal backend skew test (and
-   the enforcement if missing) **moves into SP5-complete** as a small backend fix.
-3. **Signature bound to `borrowerId` + `terminalId` + `jkt`** (not just the nonce) —
-   `src/modules/mcp-gateway/utils/agent-workload-pop.util.ts` canonicalizes all five fields;
-   `agents-workload-key.e2e.spec.ts` "forged / bad signature maps POP_CHALLENGE_INVALID to
-   400", plus the `TERMINAL_NOT_OWNED` / path-vs-body-terminal-mismatch cases.
-4. **Registration requires the borrower's authenticated session** —
-   `agents-workload-key.e2e.spec.ts` "OAuth caller missing borrower:token returns 403
-   MCP_SCOPE_DENIED" and "service-token caller failing the scope gate returns 403".
+1. **Nonce single-use store (TTL ≥ `iat` skew window).** Named:
+   `src/modules/mcp-gateway/__tests__/agents-workload-key.e2e.spec.ts` → "nonce replay maps
+   POP_CHALLENGE_INVALID to 400" evidences single-use. **Open in Track 0:** the TTL ≥ skew
+   *relationship* is not evidenced by a named test — Track 0 names one or adds it.
+2. **`iat` skew bound enforced.** **Open in Track 0:** no dedicated skew test appears in the
+   `agents-workload-key` e2e matrix. Track 0 confirms the enforcement + names a test, or
+   adds both as a minimal backend PR.
+3. **Signature bound to `borrowerId` + `terminalId` + `jkt`** (not just the nonce).
+   **Named:** `src/modules/mcp-gateway/utils/agent-workload-pop.util.ts` canonicalizes all
+   five fields; `agents-workload-key.e2e.spec.ts` → "forged / bad signature maps
+   POP_CHALLENGE_INVALID to 400", plus "path vs body terminal_id mismatch maps
+   VALIDATION_ERROR to 400" and "TERMINAL_NOT_OWNED maps to 403". **Confirmed.**
+4. **Registration requires the borrower's authenticated session.** **Named:**
+   `agents-workload-key.e2e.spec.ts` → "OAuth caller missing borrower:token returns 403
+   MCP_SCOPE_DENIED" and "service-token caller failing the scope gate returns 403
+   INSUFFICIENT_PERMISSIONS". **Confirmed.**
 
-**Reopen (pull the server challenge forward) if** any of the four is absent, or registration
-ever becomes callable without borrower auth. The follow-up ticket is filed with a
-`blocked-by` link to SP5-complete's merge so it cannot be lost.
+So #3 and #4 are confirmed by named tests today; #1 (TTL ≥ skew sub-part) and #2 (skew
+enforcement + test) are **open and owned by Track 0**. Track 2 must not merge until Track 0
+closes them (named test exists, or the minimal backend fix is merged).
+
+**Reopen (pull the server challenge forward) if** Track 0 cannot close #1/#2, or
+registration ever becomes callable without borrower auth. The server-issued-challenge
+follow-up ticket is filed with a `blocked-by` link to SP5-complete's merge so it cannot be
+lost.
 
 ---
 
 ## Testing strategy
 
+- **Track 0 (backend):** name (or add) the tests for nonce-replay defenses #1 (TTL ≥ skew)
+  and #2 (`iat` skew enforcement) in `sohopay-backend`; resolution gates Track 2 merge.
 - **Track 1 (signer):** unit/CLI tests for the `key generate` branch table (incl. the
   parallel-invocation race and the integrity re-derivation), the INV-4 validator (symlink,
   `..`, outside-root, wrong-leaf, loosened-perms, cross-borrower, realpath-root), INV-errleak
