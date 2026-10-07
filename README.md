@@ -96,8 +96,8 @@ npx @sohopay/agent-signer capabilities --output json
   ```
   Usage errors (unknown command or flag, missing flag value) exit `2` with a
   plain one-line message.
-- The CLI holds **agent workload keys only**; it never touches a borrower key.
-  The seed is never logged.
+- The CLI holds **agent workload keys only**; it never touches a borrower key,
+  and the seed is never logged.
 
 ### Key input is reference-only
 
@@ -149,7 +149,7 @@ echo '{ "public_jwk": { ... } }' | sohopay-signer key jkt --input - --output jso
 
 ```bash
 echo '{ "fields": { "borrowerId": "...", "terminalId": "...", "jkt": "...", "nonce": "...", "iat": 0 } }' \
-  | sohopay-signer pop sign --input - --key ./agent-key.json --output json
+  | sohopay-signer pop sign --input - --key ~/.agents/sohopay-agent-workload/secret.json --output json
 # {"signer_protocol":"sohopay-signer/1","implementation":"@sohopay/agent-signer",
 #  "implementation_version":"0.x.y","pop_signature":"...","algorithm":"Ed25519"}
 ```
