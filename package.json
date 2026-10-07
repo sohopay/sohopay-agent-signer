@@ -3,6 +3,13 @@
   "version": "0.3.0",
   "private": false,
   "description": "Deterministic client-side signer for SohoPay Protocol V2 agent payments: Ed25519 vouchers, PoP challenges, RFC 7638 jkt. Holds agent workload keys only — never borrower keys.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sohopay/sohopay-agent-signer.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
   "exports": {
     ".": {
