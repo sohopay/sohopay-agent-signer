@@ -1,16 +1,20 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { IMPLEMENTATION, SIGNER_PROTOCOL, SUPPORTED_SIGNING } from "../constants.js";
+import { toBase64Url } from "../encoding.js";
 import { buildPaymentSignatureHeader } from "../envelope.js";
 import { SignerError } from "../errors.js";
 import { computeJkt, decodeWorkloadSeed, workloadKeyFromPrivate } from "../keys.js";
-import { signPoP, type PopChallengeFields } from "../pop.js";
+import { signPoP } from "../pop.js";
 import {
   computePaymentId,
   signVoucher,
   type AgentPaymentVoucher,
   type AgentPaymentVoucherCore,
 } from "../voucher.js";
+import { loadKeyFile, type StoredWorkloadKey } from "../storage.js";
+import { validateKeyPath } from "./key-path.js";
 import { readKeyFile, resolveKeyBlock, type ResolvedKey } from "./io.js";
 import { verifyVectors } from "./verify-vectors.js";
 
@@ -222,27 +226,43 @@ export function voucherSignEnvelopeResult(
   };
 }
 
-/** `{ fields, key? } (+ optional --key) → { pop_signature }`. */
+/** `{ fields: { borrowerId, terminalId, jkt } } (+ --key <path>) → { …, pop_signature, nonce, iat }`. */
 export function popSignResult(
   input: unknown,
   keyFileSource: string | undefined,
-  stdin: string,
+  _stdin: string,
+  opts: { homeDir?: string; env?: NodeJS.ProcessEnv } = {},
 ): Record<string, unknown> {
   const record = (input ?? {}) as Record<string, unknown>;
-  const fields = record.fields;
-  if (fields === null || typeof fields !== "object") {
-    throw new SignerError("MALFORMED_ENVELOPE", "pop sign requires a `fields` object");
+  const fields = record.fields as { borrowerId?: unknown; terminalId?: unknown; jkt?: unknown } | undefined;
+  if (fields === null || fields === undefined || typeof fields !== "object") {
+    throw new SignerError("MALFORMED_INPUT", "pop sign requires a `fields` object");
   }
-  const key = resolveSigningKey(record, keyFileSource, stdin);
-  if (!key.privateKeyBase64Url) {
-    throw new SignerError("MALFORMED_ENVELOPE", "signing key is missing private_key_base64url");
+  if (keyFileSource === undefined) {
+    throw new SignerError("MALFORMED_INPUT", "pop sign requires --key <path>");
   }
-  const { pop_signature } = signPoP(fields as PopChallengeFields, key.privateKeyBase64Url);
+  const { borrowerId, terminalId, jkt } = fields;
+  if (typeof borrowerId !== "string" || typeof terminalId !== "string" || typeof jkt !== "string") {
+    throw new SignerError("MALFORMED_INPUT", "pop sign fields require string borrowerId, terminalId, jkt");
+  }
+
+  // Bind the claimed identity to the stored key before signing anything.
+  const stored = loadKeyFile(validateKeyPath(keyFileSource, "read", opts)) as StoredWorkloadKey;
+  if (stored.borrower_id !== borrowerId) throw new SignerError("CROSS_BORROWER_KEY", "fields.borrowerId does not match the key file");
+  if (stored.terminal_id !== terminalId) throw new SignerError("TERMINAL_MISMATCH", "fields.terminalId does not match the key file");
+  if (stored.jkt !== jkt) throw new SignerError("AGENT_KEY_JKT_MISMATCH", "fields.jkt does not match the key file");
+
+  // Nonce/iat are minted here, never accepted from the caller (replay defense).
+  const nonce = toBase64Url(randomBytes(32));
+  const iat = Math.floor(Date.now() / 1000);
+  const { pop_signature } = signPoP({ borrowerId, terminalId, jkt, nonce, iat }, stored.private_key_base64url);
   return {
     signer_protocol: SIGNER_PROTOCOL,
     implementation: IMPLEMENTATION,
     implementation_version: implementationVersion(),
     pop_signature,
+    nonce,
+    iat,
     algorithm: SUPPORTED_SIGNING.algorithm,
   };
 }
