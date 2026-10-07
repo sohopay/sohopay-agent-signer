@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import { needsStdin, parseArgs, UsageError } from "../src/cli/args.js";
 import { run } from "../src/cli/run.js";
+import { cliInvocation } from "./helpers/cli-bin.js";
 
 test("parseArgs reads a two-token command plus flags", () => {
   const p = parseArgs(["voucher", "sign", "--input", "-", "--output", "json"]);
@@ -59,7 +60,8 @@ test("an unknown command is a usage error: exit 2, plain stderr, no JSON envelop
 });
 
 test("the real bin pipes capabilities over stdio (subprocess smoke)", () => {
-  const r = spawnSync("node", ["--import", "tsx", "src/cli/index.ts", "capabilities", "--output", "json"], {
+  const { cmd, prefix } = cliInvocation();
+  const r = spawnSync(cmd, [...prefix, "capabilities", "--output", "json"], {
     input: "",
     encoding: "utf8",
     cwd: process.cwd(),
