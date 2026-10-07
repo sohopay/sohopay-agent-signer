@@ -22,7 +22,12 @@ export function implementationVersion(): string {
   return pkg.version ?? "0.0.0";
 }
 
-const COMMANDS = ["voucher sign", "payment-id", "key jkt", "pop sign", "verify-vectors", "capabilities"];
+const COMMANDS = ["voucher sign", "payment-id", "key jkt", "key generate", "pop sign", "verify-vectors", "capabilities"];
+
+const COMMAND_CONTRACTS: Record<string, string> = {
+  "key generate": "workload-keygen/1",
+  "pop sign": "pop-sign/1",
+};
 
 /** Static advertisement SP5 routing probes to confirm a usable signer. */
 export function capabilitiesResult(): Record<string, unknown> {
@@ -32,6 +37,7 @@ export function capabilitiesResult(): Record<string, unknown> {
     implementation_version: implementationVersion(),
     algorithms: [SUPPORTED_SIGNING.algorithm],
     commands: COMMANDS,
+    command_contracts: COMMAND_CONTRACTS,
   };
 }
 
