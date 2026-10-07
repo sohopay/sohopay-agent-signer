@@ -285,7 +285,9 @@ sohopay-signer voucher sign --envelope --key <file> --input <file> [--write-head
 - **`--write-header <path>`** (optional): writes a curl-ready header line
   `<header_name>: <header_value>\n` to `<path>` with mode **0600**, so a shell-based merchant
   retry is `curl -H @<path>` with the signed value never entering a shell argument or the
-  model's context; stdout is unchanged. Honors the same no-secrets posture (the signed
+  model's context. **0.3.1 (INV-1):** under `--write-header`, stdout/stderr carry no
+  `header_value` (nor the decomposed `envelope`/`signature`); stdout reports `header_file`
+  plus non-secret metadata. Without the flag stdout is unchanged. Honors the same no-secrets posture (the signed
   voucher is a replayable credential until expiry, but carries no key material).
 - **Versioning:** this curl-ready `--write-header` format and `--envelope` ship together in
   `@sohopay/agent-signer` **0.2.0**. The package is private and was **never published**, and
