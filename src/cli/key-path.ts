@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync, type Stats } from "node:fs";
 import { platform, userInfo } from "node:os";
 import { basename, dirname, resolve, sep } from "node:path";
 
@@ -7,6 +7,16 @@ import { resolveKeyRoots } from "./signer-config.js";
 
 function invalid(message: string): never {
   throw new SignerError("KEY_PATH_INVALID", message);
+}
+
+/** lstat never follows links, so a dangling symlink is still reported; only ENOENT means absent. */
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return invalid(`cannot inspect ${path}`);
+  }
 }
 
 /** No symlink and no `..` from the root down to the target (existing components only). */
@@ -18,13 +28,20 @@ function assertNoSymlinkBelow(root: string, target: string): void {
   for (const seg of rest) {
     if (seg === "..") invalid("path must not contain ..");
     cur = cur + sep + seg;
-    if (existsSync(cur) && lstatSync(cur).isSymbolicLink()) invalid(`${cur} is a symlink`);
+    const st = lstatOrNull(cur);
+    if (st === null) return; // genuinely absent: nothing below it exists either
+    if (st.isSymbolicLink()) invalid(`${cur} is a symlink`);
   }
 }
 
 function assertOwnerMode(path: string, denyMask: number): void {
   if (platform() === "win32") return;
-  const st = statSync(path);
+  let st: Stats;
+  try {
+    st = statSync(path);
+  } catch {
+    return invalid(`${path} cannot be inspected (missing or unreadable)`);
+  }
   if (st.uid !== userInfo().uid) invalid(`${path} is not owned by the current user`);
   if ((st.mode & denyMask) !== 0) invalid(`${path} has too-permissive mode`);
 }
@@ -62,9 +79,9 @@ export function validateKeyPath(
   assertOwnerMode(dirname(target), 0o077); // parent dir 0700, owner
 
   if (mode === "read") {
-    if (!existsSync(target)) invalid(`${target} does not exist`);
+    if (lstatOrNull(target) === null) invalid(`${target} does not exist`);
     assertOwnerMode(target, 0o077); // file 0600, owner
-  } else if (existsSync(target)) {
+  } else if (lstatOrNull(target) !== null) {
     invalid(`${target} already exists (ensure mode never overwrites)`);
   }
   return target;

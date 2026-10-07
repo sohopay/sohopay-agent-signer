@@ -74,3 +74,41 @@ test("INV-rootenv: env root outside configured roots fails KEY_PATH_INVALID", ()
         { homeDir: home, env: { SOHOPAY_SIGNER_KEY_ROOTS: "/tmp" } }), code);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("a dangling symlink at secret.json is refused in ensure and read mode", () => {
+  const { home, root } = fixture();
+  try {
+    const p = join(root, "secret.json");
+    symlinkSync(join(home, "nonexistent", "evil", "secret.json"), p);
+    assert.throws(() => validateKeyPath(p, "ensure", { homeDir: home, env: {} }), code);
+    assert.throws(() => validateKeyPath(p, "read", { homeDir: home, env: {} }), code);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a missing parent directory is KEY_PATH_INVALID, not a raw ENOENT", () => {
+  const { home, root } = fixture();
+  try {
+    assert.throws(() => validateKeyPath(join(root, "nodir", "secret.json"), "ensure", { homeDir: home, env: {} }), code);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("`..` is normalised lexically: root/x/../secret.json resolves to the in-root path", () => {
+  const { home, root } = fixture();
+  try {
+    const p = validateKeyPath(join(root, "x", "..", "secret.json"), "ensure", { homeDir: home, env: {} });
+    assert.ok(p.endsWith("/sohopay-agent-workload/secret.json"));
+    assert.ok(!p.includes(".."));
+    // an escaping `..` normalises outside the root and is refused
+    assert.throws(() => validateKeyPath(join(root, "..", "secret.json"), "ensure", { homeDir: home, env: {} }), code);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("read mode accepts an existing 0600 owner file and returns the canonical path", () => {
+  const { home, root } = fixture();
+  try {
+    const p = join(root, "secret.json");
+    writeFileSync(p, "{}", { mode: 0o600 }); chmodSync(p, 0o600);
+    const out = validateKeyPath(p, "read", { homeDir: home, env: {} });
+    assert.ok(out.endsWith("/.agents/sohopay-agent-workload/secret.json"));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
