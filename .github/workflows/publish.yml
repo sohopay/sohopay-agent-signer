@@ -3,8 +3,8 @@
 # Complementary to release-bundle.yml (which attaches the portable bundled JS to a
 # GitHub Release on js-bundle-v* tags). This channel is the installable npm package
 # that `npx @sohopay/agent-signer@<version>` resolves — required by downstream merge
-# gates (e.g. sohopay/skills' signer-contract-check). Triggered by a v* tag (no overlap
-# with js-bundle-v*) or manually with the tag to publish.
+# gates (e.g. sohopay/skills' signer-contract-check). Triggered by a semver vX.Y.Z tag
+# (no overlap with js-bundle-v*) or manually with the tag to publish.
 #
 # Visibility note: GitHub links the package to this repo on first publish via
 # GITHUB_TOKEN. Grant the package Read access to any consumer repo (e.g. sohopay/skills)
@@ -13,7 +13,8 @@ name: Publish package
 
 on:
   push:
-    tags: ["v*"]
+    # Semver release tags only (v0.3.0, v1.2.3) — not every v* tag. No overlap with js-bundle-v*.
+    tags: ["v[0-9]*.[0-9]*.[0-9]*"]
   workflow_dispatch:
     inputs:
       tag:
