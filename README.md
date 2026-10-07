@@ -86,7 +86,7 @@ Release, **verify**, then point `$SOHOPAY_SIGNER` at it.
 
 1. Download the exact version you want (never `latest`):
 
-       V=0.2.0   # the js-bundle-v<version> you intend to run
+       V=0.3.0   # the js-bundle-v<version> you intend to run
        gh release download "js-bundle-v$V" --repo sohopay/sohopay-agent-signer \
          --pattern 'sohopay-signer.mjs' --pattern 'sohopay-signer.mjs.sha256'
 
