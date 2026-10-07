@@ -33,6 +33,8 @@ test("a corrupted secret.json never surfaces its contents in any command's outpu
         ? JSON.stringify({ fields: { borrowerId: "b", terminalId: "t", jkt: "j" } })
         : JSON.stringify({ borrower_id: "b", terminal_id: "t" });
       const r = run(argv, stdin);
+      // Premise lock: proves the corrupted file was actually read, so the canary check is not vacuous.
+      assert.match(r.stderr, /STORED_KEY_CORRUPT/);
       assert.ok(!r.stdout.includes(CANARY) && !r.stderr.includes(CANARY), `leaked canary: ${r.stdout}${r.stderr}`);
     }
   } finally {
