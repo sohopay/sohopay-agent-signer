@@ -82,6 +82,11 @@ export function run(argv: string[], stdin: string): CliResult {
             } catch {
               throw new SignerError("MALFORMED_ENVELOPE", `cannot write header file: ${parsed.writeHeader}`);
             }
+            // INV-1: the file is now the ONLY carrier of the credential. Drop header_value
+            // and its decomposed forms (the completed envelope and its signature) from the
+            // result so none reach stdout; report the file path plus non-secret metadata.
+            const { header_value: _hv, envelope: _env, signature: _sig, ...publicFields } = result;
+            result = { ...publicFields, header_file: parsed.writeHeader };
           }
         } else {
           result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);

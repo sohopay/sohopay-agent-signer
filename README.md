@@ -86,7 +86,7 @@ Release, **verify**, then point `$SOHOPAY_SIGNER` at it.
 
 1. Download the exact version you want (never `latest`):
 
-       V=0.3.0   # the js-bundle-v<version> you intend to run
+       V=0.3.1   # the js-bundle-v<version> you intend to run
        gh release download "js-bundle-v$V" --repo sohopay/sohopay-agent-signer \
          --pattern 'sohopay-signer.mjs' --pattern 'sohopay-signer.mjs.sha256'
 
@@ -152,6 +152,9 @@ npx @sohopay/agent-signer capabilities --output json
 
 - `--input -` reads a JSON object from **stdin**; `--output json` emits a single
   JSON object to **stdout** and nothing else.
+- With `voucher sign --envelope --write-header <path>`, the opaque `header_value`
+  (and the `envelope`/`signature` that encode it) is written **only** to the 0600
+  file; stdout reports `header_file` and non-secret metadata (INV-1).
 - `stderr` is diagnostics only. **A non-zero exit means failure.**
 - Operational failures exit `1` with an error envelope on stderr:
   ```json
