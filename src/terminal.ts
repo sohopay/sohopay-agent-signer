@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -108,5 +108,43 @@ export function resolveTerminalId(options: ResolveTerminalIdOptions = {}): strin
 
   const minted = `${hostLabel()}:${randomUUID()}`;
   persistTerminalId(filePath, minted);
+  return minted;
+}
+
+/**
+ * Harnesses that may hold their own terminal id. A fixed list, so the slug is a safe
+ * single path segment and no caller-chosen string ever names a directory.
+ */
+export const HARNESSES = ["antigravity", "claude-code", "codex", "cursor", "hermes"] as const;
+export type Harness = (typeof HARNESSES)[number];
+
+/**
+ * Per-harness terminal id: `{harness}:{uuid}` persisted at `<dataDir>/<harness>/terminal_id`
+ * (dir 0700, file 0600), minted on first use and stable afterwards. Unlike
+ * {@link resolveTerminalId} it ignores `SOHO_TERMINAL_ID`: a host-wide override would
+ * collapse every harness back onto one terminal.
+ */
+export function resolveHarnessTerminalId(harness: string, dataDir?: string): string {
+  if (!(HARNESSES as readonly string[]).includes(harness)) {
+    throw new SignerError("INVALID_HARNESS", `--harness must be one of: ${HARNESSES.join(", ")}`);
+  }
+  const dir = join(resolveDataDir(dataDir), harness);
+  const filePath = join(dir, "terminal_id");
+  const persisted = readPersistedTerminalId(filePath);
+  if (persisted) {
+    return persisted;
+  }
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const minted = `${harness}:${randomUUID()}`;
+  try {
+    // O_EXCL: two first calls racing must agree on one id, so the loser re-reads.
+    writeFileSync(filePath, `${minted}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const winner = readPersistedTerminalId(filePath);
+    if (!winner) throw new SignerError("INVALID_TERMINAL_ID", `${filePath} holds no valid terminal id`);
+    return winner;
+  }
   return minted;
 }

@@ -174,6 +174,21 @@ material in the stdin JSON (`"key": { ... }`) is rejected with
 `SOHOPAY_SIGNER_KEY_ROOTS` can only narrow it). The file must be mode `0600` and
 may not be a symlink. Anything else fails with `KEY_PATH_INVALID`.
 
+### One key per terminal (`workload-terminal/1`)
+
+Two installs on one machine need two terminals and two keys. `terminal id --harness <name>`
+returns a stable `<name>:<uuid>` for that harness (persisted at `~/.sohopay/<name>/terminal_id`,
+file `0600`, folder `0700`). `--harness` accepts only `antigravity`, `claude-code`, `codex`,
+`cursor` or `hermes`; anything else fails with `INVALID_HARNESS`. `SOHO_TERMINAL_ID` is not
+consulted here.
+
+`key generate`, `pop sign` and `voucher sign` accept `--terminal <id>` in place of
+`--out` / `--key`. The signer picks the key file itself:
+`~/.agents/sohopay-agent-workload/<sha256-hex(id)>/secret.json`, so the raw id never
+reaches the filesystem. All the checks above still apply. `key generate --terminal`
+also requires `terminal_id` in the input to equal the flag (`TERMINAL_MISMATCH` otherwise).
+An existing `--key .../secret.json` install keeps working unchanged.
+
 ### Commands
 
 `key generate`: creates a new Ed25519 workload key.
@@ -218,6 +233,13 @@ echo '{ "fields": { "borrowerId": "...", "terminalId": "...", "jkt": "...", "non
   | sohopay-signer pop sign --input - --key ~/.agents/sohopay-agent-workload/secret.json --output json
 # {"signer_protocol":"sohopay-signer/1","implementation":"@sohopay/agent-signer",
 #  "implementation_version":"0.x.y","pop_signature":"...","algorithm":"Ed25519"}
+```
+
+`terminal id`: the stable terminal id for one harness (see above).
+
+```bash
+sohopay-signer terminal id --harness claude-code --output json
+# {"terminal_id":"claude-code:<uuid>"}
 ```
 
 `verify-vectors`: runs the bundled known-answer vectors; exits `0` only if all pass.

@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, statSync, type Stats } from "node:fs";
-import { platform, userInfo } from "node:os";
-import { basename, dirname, resolve, sep } from "node:path";
+import { homedir, platform, userInfo } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 import { SignerError } from "../errors.js";
-import { resolveKeyRoots } from "./signer-config.js";
+import { assertValidTerminalId } from "../terminal.js";
+import { DEFAULT_SUBDIR, resolveKeyRoots } from "./signer-config.js";
 
 function invalid(message: string): never {
   throw new SignerError("KEY_PATH_INVALID", message);
@@ -145,4 +147,35 @@ export function validateKeyPath(
     invalid(`${target} already exists (ensure mode never overwrites)`);
   }
   return target;
+}
+
+/**
+ * `--terminal <id>` -> `<default root>/<sha256-hex(id)>/secret.json`. The raw id
+ * (`:`, `@`, `..`) never reaches the filesystem; only its digest names the folder.
+ * Ensure mode creates that one 0700 folder (and an absent root); the returned path
+ * still goes through {@link validateKeyPath}, so every existing check applies.
+ */
+export function terminalKeyPath(
+  terminalId: string,
+  mode: "read" | "ensure",
+  opts: { homeDir?: string; env?: NodeJS.ProcessEnv } = {},
+): string {
+  const id = assertValidTerminalId(terminalId);
+  // The digest already keeps `..` off disk; refuse it anyway so a traversal-shaped id fails loudly.
+  if (id.includes("..")) invalid("terminal id must not contain ..");
+  const digest = createHash("sha256").update(id, "utf8").digest("hex");
+  const file = join(opts.homeDir ?? homedir(), ...DEFAULT_SUBDIR, digest, "secret.json");
+  if (mode === "ensure") {
+    const found = locateRoot(file, resolveKeyRoots(opts));
+    if (!found) invalid(`${file} is not under an allowed key root`);
+    ensureRootExists(found.root);
+    const dir = dirname(found.canonical);
+    assertNoSymlinkBelow(found.root, dir);
+    try {
+      mkdirSync(dir, { mode: 0o700 });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") invalid(`cannot create ${dir}`);
+    }
+  }
+  return file;
 }
