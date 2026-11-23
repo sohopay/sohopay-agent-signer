@@ -5,7 +5,11 @@ import { capabilitiesResult, keyJktResult, paymentIdResult, popSignResult, verif
 import { readInput } from "./io.js";
 import { assertInputSchema, assertOutputSchema } from "./io-schema.js";
 import { keyGenerateResult } from "./key-generate.js";
+import { terminalKeyPath } from "./key-path.js";
 import { SignerError } from "../errors.js";
+import { resolveHarnessTerminalId } from "../terminal.js";
+
+const TERMINAL_COMMANDS = new Set(["key generate", "pop sign", "voucher sign"]);
 
 export interface CliResult {
   stdout: string;
@@ -46,10 +50,30 @@ export function run(argv: string[], stdin: string): CliResult {
       throw new UsageError("--write-header requires --envelope");
     }
 
+    if (parsed.harness !== undefined && parsed.command !== "terminal id") {
+      throw new UsageError("--harness is only valid for `terminal id`");
+    }
+    if (parsed.terminal !== undefined) {
+      if (!TERMINAL_COMMANDS.has(parsed.command)) {
+        throw new UsageError("--terminal is only valid for `key generate`, `pop sign` and `voucher sign`");
+      }
+      if (parsed.key !== undefined || parsed.out !== undefined) {
+        throw new UsageError("--terminal replaces --key / --out; pass only one");
+      }
+    }
+    const terminalKey =
+      parsed.terminal !== undefined && parsed.command !== "key generate"
+        ? terminalKeyPath(parsed.terminal, "read")
+        : undefined;
+
     let result: Record<string, unknown>;
     switch (parsed.command) {
       case "capabilities":
         result = capabilitiesResult();
+        break;
+      case "terminal id":
+        if (parsed.harness === undefined) throw new UsageError("terminal id requires --harness <name>");
+        result = { terminal_id: resolveHarnessTerminalId(parsed.harness) };
         break;
       case "payment-id":
         result = paymentIdResult(readInput(parsed.input, stdin));
@@ -59,7 +83,7 @@ export function run(argv: string[], stdin: string): CliResult {
         break;
       case "voucher sign":
         if (parsed.envelope) {
-          result = voucherSignEnvelopeResult(readInput(parsed.input, stdin), parsed.key, stdin);
+          result = voucherSignEnvelopeResult(readInput(parsed.input, stdin), terminalKey ?? parsed.key, stdin);
           if (parsed.writeHeader !== undefined) {
             const headerName = result.header_name;
             const headerValue = result.header_value;
@@ -89,20 +113,28 @@ export function run(argv: string[], stdin: string): CliResult {
             result = { ...publicFields, header_file: parsed.writeHeader };
           }
         } else {
-          result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
+          result = voucherSignResult(readInput(parsed.input, stdin), terminalKey ?? parsed.key, stdin);
         }
         break;
       case "key generate": {
         const input = readInput(parsed.input, stdin);
         assertInputSchema("key generate", input);
-        result = keyGenerateResult(input, parsed.out);
+        let out = parsed.out;
+        if (parsed.terminal !== undefined) {
+          // The key file is named by --terminal, so the key inside must be bound to it too.
+          if ((input as { terminal_id?: unknown }).terminal_id !== parsed.terminal) {
+            throw new SignerError("TERMINAL_MISMATCH", "input terminal_id does not match --terminal");
+          }
+          out = terminalKeyPath(parsed.terminal, "ensure");
+        }
+        result = keyGenerateResult(input, out);
         assertOutputSchema("key generate", result);
         break;
       }
       case "pop sign": {
         const input = readInput(parsed.input, stdin);
         assertInputSchema("pop sign", input);
-        result = popSignResult(input, parsed.key, stdin);
+        result = popSignResult(input, terminalKey ?? parsed.key, stdin);
         assertOutputSchema("pop sign", result);
         break;
       }

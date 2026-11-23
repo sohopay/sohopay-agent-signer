@@ -4,6 +4,8 @@ export interface ParsedArgs {
   input?: string;
   key?: string;
   out?: string;
+  terminal?: string;
+  harness?: string;
   output: "json" | "human";
   envelope: boolean;
   writeHeader?: string;
@@ -25,6 +27,7 @@ const KNOWN_COMMANDS = new Set([
   "pop sign",
   "verify-vectors",
   "capabilities",
+  "terminal id",
 ]);
 
 function requireValue(argv: string[], index: number, flag: string): string {
@@ -41,6 +44,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let input: string | undefined;
   let key: string | undefined;
   let out: string | undefined;
+  let terminal: string | undefined;
+  let harness: string | undefined;
   let output: "json" | "human" = "human";
   let envelope = false;
   let writeHeader: string | undefined;
@@ -63,6 +68,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
         key = valueOf("--key");
       } else if (name === "--out") {
         out = valueOf("--out");
+      } else if (name === "--terminal") {
+        terminal = valueOf("--terminal");
+      } else if (name === "--harness") {
+        harness = valueOf("--harness");
       } else if (name === "--output") {
         const value = valueOf("--output");
         if (value !== "json" && value !== "human") {
@@ -99,7 +108,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UsageError(`unexpected argument: ${positionals[commandTokens]}`);
   }
 
-  return { command, input, key, out, output, envelope, writeHeader };
+  return { command, input, key, out, terminal, harness, output, envelope, writeHeader };
 }
 
 /** True when this invocation reads stdin — "-" is the stdin sentinel for --input/--key (space- or `=`-separated). */

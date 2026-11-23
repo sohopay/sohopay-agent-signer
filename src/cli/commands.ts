@@ -38,11 +38,13 @@ export function implementationVersion(): string {
   return pkg.version;
 }
 
-const COMMANDS = ["voucher sign", "payment-id", "key jkt", "key generate", "pop sign", "verify-vectors", "capabilities"];
+const COMMANDS = ["voucher sign", "payment-id", "key jkt", "key generate", "pop sign", "verify-vectors", "capabilities", "terminal id"];
 
 const COMMAND_CONTRACTS: Record<string, string> = {
   "key generate": "workload-keygen/1",
   "pop sign": "pop-sign/1",
+  // `terminal id --harness` plus `--terminal <id>` on key generate / pop sign / voucher sign.
+  "terminal id": "workload-terminal/1",
 };
 
 /** Static advertisement SP5 routing probes to confirm a usable signer. */

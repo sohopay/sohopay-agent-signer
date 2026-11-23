@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { SignerError } from "../errors.js";
 
-const DEFAULT_SUBDIR = [".agents", "sohopay-agent-workload"];
+export const DEFAULT_SUBDIR = [".agents", "sohopay-agent-workload"];
 const CONFIG_REL = [".config", "sohopay-signer", "config.json"];
 
 function invalid(message: string): never {

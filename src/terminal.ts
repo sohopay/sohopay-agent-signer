@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -109,4 +109,55 @@ export function resolveTerminalId(options: ResolveTerminalIdOptions = {}): strin
   const minted = `${hostLabel()}:${randomUUID()}`;
   persistTerminalId(filePath, minted);
   return minted;
+}
+
+/**
+ * Harnesses that may hold their own terminal id. A fixed list, so the slug is a safe
+ * single path segment and no caller-chosen string ever names a directory.
+ */
+export const HARNESSES = ["antigravity", "claude-code", "codex", "cursor", "hermes"] as const;
+export type Harness = (typeof HARNESSES)[number];
+
+/**
+ * Per-harness terminal id: `{harness}:{uuid}` persisted at `<dataDir>/<harness>/terminal_id`
+ * (dir 0700, file 0600), minted on first use and stable afterwards. Unlike
+ * {@link resolveTerminalId} it ignores `SOHO_TERMINAL_ID`: a host-wide override would
+ * collapse every harness back onto one terminal.
+ */
+export function resolveHarnessTerminalId(harness: string, dataDir?: string): string {
+  if (!(HARNESSES as readonly string[]).includes(harness)) {
+    throw new SignerError("INVALID_HARNESS", `--harness must be one of: ${HARNESSES.join(", ")}`);
+  }
+  const dir = join(resolveDataDir(dataDir), harness);
+  const filePath = join(dir, "terminal_id");
+  const persisted = readHarnessTerminalId(filePath, harness);
+  if (persisted) return persisted;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const minted = `${harness}:${randomUUID()}`;
+  // Write a private temp file, then publish it with link(2): the id appears complete or
+  // not at all, so a racing first call can never read a half-written file, and EEXIST
+  // means someone else won and their id is already whole.
+  const tmp = join(dir, `.terminal_id.${process.pid}.${randomUUID()}`);
+  writeFileSync(tmp, `${minted}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  try {
+    linkSync(tmp, filePath);
+    return minted;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const winner = readHarnessTerminalId(filePath, harness);
+    if (!winner) throw new SignerError("INVALID_TERMINAL_ID", `${filePath} holds no valid terminal id`);
+    return winner;
+  } finally {
+    unlinkSync(tmp);
+  }
+}
+
+/** Reads the persisted id and refuses one minted for another harness (a copied or edited file). */
+function readHarnessTerminalId(filePath: string, harness: string): string | undefined {
+  const id = readPersistedTerminalId(filePath);
+  if (id !== undefined && !id.startsWith(`${harness}:`)) {
+    throw new SignerError("INVALID_TERMINAL_ID", `${filePath} holds an id that does not belong to ${harness}`);
+  }
+  return id;
 }
