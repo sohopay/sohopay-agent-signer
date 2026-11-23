@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -130,21 +130,34 @@ export function resolveHarnessTerminalId(harness: string, dataDir?: string): str
   }
   const dir = join(resolveDataDir(dataDir), harness);
   const filePath = join(dir, "terminal_id");
-  const persisted = readPersistedTerminalId(filePath);
-  if (persisted) {
-    return persisted;
-  }
+  const persisted = readHarnessTerminalId(filePath, harness);
+  if (persisted) return persisted;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const minted = `${harness}:${randomUUID()}`;
+  // Write a private temp file, then publish it with link(2): the id appears complete or
+  // not at all, so a racing first call can never read a half-written file, and EEXIST
+  // means someone else won and their id is already whole.
+  const tmp = join(dir, `.terminal_id.${process.pid}.${randomUUID()}`);
+  writeFileSync(tmp, `${minted}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
   try {
-    // O_EXCL: two first calls racing must agree on one id, so the loser re-reads.
-    writeFileSync(filePath, `${minted}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    linkSync(tmp, filePath);
+    return minted;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const winner = readPersistedTerminalId(filePath);
+    const winner = readHarnessTerminalId(filePath, harness);
     if (!winner) throw new SignerError("INVALID_TERMINAL_ID", `${filePath} holds no valid terminal id`);
     return winner;
+  } finally {
+    unlinkSync(tmp);
   }
-  return minted;
+}
+
+/** Reads the persisted id and refuses one minted for another harness (a copied or edited file). */
+function readHarnessTerminalId(filePath: string, harness: string): string | undefined {
+  const id = readPersistedTerminalId(filePath);
+  if (id !== undefined && !id.startsWith(`${harness}:`)) {
+    throw new SignerError("INVALID_TERMINAL_ID", `${filePath} holds an id that does not belong to ${harness}`);
+  }
+  return id;
 }

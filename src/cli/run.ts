@@ -60,8 +60,11 @@ export function run(argv: string[], stdin: string): CliResult {
       if (parsed.key !== undefined || parsed.out !== undefined) {
         throw new UsageError("--terminal replaces --key / --out; pass only one");
       }
-      if (parsed.command !== "key generate") parsed.key = terminalKeyPath(parsed.terminal, "read");
     }
+    const terminalKey =
+      parsed.terminal !== undefined && parsed.command !== "key generate"
+        ? terminalKeyPath(parsed.terminal, "read")
+        : undefined;
 
     let result: Record<string, unknown>;
     switch (parsed.command) {
@@ -80,7 +83,7 @@ export function run(argv: string[], stdin: string): CliResult {
         break;
       case "voucher sign":
         if (parsed.envelope) {
-          result = voucherSignEnvelopeResult(readInput(parsed.input, stdin), parsed.key, stdin);
+          result = voucherSignEnvelopeResult(readInput(parsed.input, stdin), terminalKey ?? parsed.key, stdin);
           if (parsed.writeHeader !== undefined) {
             const headerName = result.header_name;
             const headerValue = result.header_value;
@@ -110,7 +113,7 @@ export function run(argv: string[], stdin: string): CliResult {
             result = { ...publicFields, header_file: parsed.writeHeader };
           }
         } else {
-          result = voucherSignResult(readInput(parsed.input, stdin), parsed.key, stdin);
+          result = voucherSignResult(readInput(parsed.input, stdin), terminalKey ?? parsed.key, stdin);
         }
         break;
       case "key generate": {
@@ -131,7 +134,7 @@ export function run(argv: string[], stdin: string): CliResult {
       case "pop sign": {
         const input = readInput(parsed.input, stdin);
         assertInputSchema("pop sign", input);
-        result = popSignResult(input, parsed.key, stdin);
+        result = popSignResult(input, terminalKey ?? parsed.key, stdin);
         assertOutputSchema("pop sign", result);
         break;
       }
