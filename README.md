@@ -112,7 +112,7 @@ Release, **verify**, then point `$SOHOPAY_SIGNER` at it.
 
 | Version | sha256 of `sohopay-signer.mjs` |
 |---------|--------------------------------|
-| _(add a row per release)_ | _(the hash from the release build)_ |
+| 0.4.0 | `493110a0918a1b048f0c772896c82f0cd277250b768e5781a2dd642137929ac1` |
 
 ### Supported invocation forms
 
